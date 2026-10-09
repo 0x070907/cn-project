@@ -1,3 +1,4 @@
+
 import struct
 
 flow_ids = {
@@ -14,46 +15,56 @@ flow_ports = {
     4: 5004
 }
 
-# we keep the data header same 
-data_format = "!IQq"
+""" the data header contains flow id, sequence number, run id and timestamp
+ ! means network byte order (big-endian)
+ I is a 4 byte unsigned integer for flow id
+ Q is an 8 byte unsigned integer for sequence number
+ Q is an 8 byte unsigned integer for run id
+ q is an 8 byte signed integer for timestamp"""
+
+data_format = "!IQQq"
 data_header_size = struct.calcsize(data_format)
 
 # control messages use a separate format from data packets
-# magic identifies our protocol, type identifies the message,
-# and run id identifies the run, flow id identifies the traffic class,
-# and count tells the receiver how many data packets to expect
+# ! means network byte order (big-endian)
+# 4s is 4 bytes for the protocol identifier
+# B is a 1 byte unsigned integer for message type
+# Q is an 8 byte unsigned integer for run id
+# I is a 4 byte unsigned integer for flow id
+# I is a 4 byte unsigned integer for expected packet count
 control_format = "!4sBQII"
 control_header_size = struct.calcsize(control_format)
 magic = b"QOS1"
 
-start_message=1
-end_message=2
-start_ack=3
-end_ack=4
+start_message = 1
+end_message = 2
+start_ack = 3
+end_ack = 4
 
 
-def pack_data(flow_id, sequence_number, timestamp, payload):
+def pack_data(flow_id, sequence_number, run_id, timestamp, payload):
     header = struct.pack(
         data_format,
         flow_id,
         sequence_number,
+        run_id,
         timestamp
     )
-    return header+payload
+    return header + payload
 
 
 def unpack_data(packet):
     if len(packet) < data_header_size:
         raise ValueError("packet is too small")
 
-    flow_id, sequence_number, timestamp = struct.unpack(
+    flow_id, sequence_number, run_id, timestamp = struct.unpack(
         data_format,
         packet[:data_header_size]
     )
 
     payload = packet[data_header_size:]
 
-    return flow_id, sequence_number, timestamp, payload
+    return flow_id, sequence_number, run_id, timestamp, payload
 
 
 def pack_control(message_type, run_id, flow_id, count):
