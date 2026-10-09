@@ -3,12 +3,15 @@ import select
 import time
 
 import protocol
+import metrics
 
 
 def main():
     ports = protocol.flow_ports
     sockets = {}
     runs = {}
+    completed_throughputs = {}
+    fairness_recorded = set()
     grace_period = 1.0
 
     # map flow IDs back to their names for printing
@@ -61,7 +64,13 @@ def main():
                                 "expected": count,
                                 "sequences": set(),
                                 "last_sequence": -1,
+                                "started_at": None,
                                 "ended_at": None,
+                                "ended_at_ns": None,
+                                "payload_bytes": 0,
+                                "latencies_ns": [],
+                                "duplicates": 0,
+                                "out_of_order": 0,
                             }
                             print(
                                 f"{flow_names[flow_id]} run {run_id} started; "
@@ -85,7 +94,10 @@ def main():
 
                         # we remember when the run ended so late packets can still arrive
                         runs[key]["expected"] = count
-                        runs[key]["ended_at"] = now
+
+                        if runs[key]["ended_at"] is None:
+                            runs[key]["ended_at"] = now
+                            runs[key]["ended_at_ns"] = time.monotonic_ns()
 
                         sock.sendto(
                             protocol.pack_control(
@@ -124,17 +136,26 @@ def main():
                 # duplicate sequence numbers shouldn't count as unique packets
                 if sequence_number in run["sequences"]:
                     duplicates[flow_id] += 1
+                    run["duplicates"] += 1
                     print(f"{flow_names[flow_id]}: duplicate packet {sequence_number}")
                     continue
 
                 # a sequence number smaller than the previous highest means reordering
                 if sequence_number < run["last_sequence"]:
                     out_of_order[flow_id] += 1
+                    run["out_of_order"] += 1
+
+                # we track payload size and latency for metrics
+                if run["started_at"] is None:
+                    run["started_at"] = time.monotonic_ns()
 
                 run["sequences"].add(sequence_number)
                 run["last_sequence"] = max(
                     run["last_sequence"], sequence_number
                 )
+
+                run["payload_bytes"] += len(payload)
+                run["latencies_ns"].append(time.monotonic_ns() - timestamp)
 
                 last_sequence[flow_id] = max(
                     last_sequence[flow_id], sequence_number
@@ -145,7 +166,7 @@ def main():
                     f"from {address[0]}:{address[1]}"
                 )
 
-            # give delayed UDP packets time to arrive before calculating packet loss
+            # we then give delayed UDP packets time to arrive before calculating packet loss
             now = time.monotonic()
 
             for key, run in list(runs.items()):
@@ -166,6 +187,62 @@ def main():
 
                     if expected > 0:
                         print(f"packet loss: {lost / expected * 100:.2f}%")
+
+                    # calculate the duration from the first data packet to the end message
+                    duration_seconds = 0.0
+
+                    if (
+                        run["started_at"] is not None
+                        and run["ended_at_ns"] is not None
+                    ):
+                        duration_seconds = max(
+                            0,
+                            run["ended_at_ns"] - run["started_at"]
+                        ) / 1_000_000_000
+
+                    # now we save the completed run's metrics to the CSV
+                    experiment_id = str(run_id)
+
+                    metrics.record_run(
+                        experiment_id=experiment_id,
+                        run_id=run_id,
+                        flow=flow_names[flow_id],
+                        expected_packets=expected,
+                        sequences=run["sequences"],
+                        duplicates=run["duplicates"],
+                        out_of_order=run["out_of_order"],
+                        payload_bytes=run["payload_bytes"],
+                        duration_seconds=duration_seconds,
+                        latencies_ns=run["latencies_ns"],
+                    )
+
+                    # save each flow's measured goodput for this experiment
+                    if duration_seconds > 0:
+                        goodput_mbps = (
+                            run["payload_bytes"] * 8
+                            / duration_seconds
+                            / 1_000_000
+                        )
+                    else:
+                        goodput_mbps = 0.0
+
+                    if experiment_id not in completed_throughputs:
+                        completed_throughputs[experiment_id] = {}
+
+                    completed_throughputs[experiment_id][flow_names[flow_id]] = (
+                        goodput_mbps
+                    )
+
+                    # calculate fairness once all four flows have completed
+                    throughputs = completed_throughputs[experiment_id]
+
+                    if (
+                        set(throughputs)
+                        == {"high", "medium", "low", "background"}
+                        and experiment_id not in fairness_recorded
+                    ):
+                        metrics.record_fairness(experiment_id, throughputs)
+                        fairness_recorded.add(experiment_id)
 
                     del runs[key]
 
@@ -207,4 +284,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

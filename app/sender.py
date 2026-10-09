@@ -10,6 +10,7 @@ import protocol
 def main():
     parser = argparse.ArgumentParser(description="udp sender")
     parser.add_argument("--ip", default="127.0.0.1")
+    parser.add_argument("--run-id", type=int, default=None)
     parser.add_argument("--port", type=int)
     parser.add_argument("--count", type=int, default=10)
     parser.add_argument("--size", type=int, default=200)
@@ -47,7 +48,7 @@ def main():
     interval = (args.size * 8) / (args.rate * 1_000_000)
     interval_ns = int(interval * 1_000_000_000)
 
-    run_id = secrets.randbits(64)
+    run_id = args.run_id if args.run_id is not None else secrets.randbits(64) # this preserves our old behaviour when we dont specify --run-id on cli
     server = (args.ip, port)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
