@@ -2,6 +2,7 @@
 import argparse
 import socket
 import time
+import struct
 
 def main():
     parser = argparse.ArgumentParser(description="udp sender")
@@ -10,6 +11,7 @@ def main():
     parser.add_argument("--count", type=int, default=10)
     parser.add_argument("--size", type=int, default=200)
     parser.add_argument("--rate", type=float, default=0.1)
+    parser.add_argument("--flow", default="high")
     args = parser.parse_args()
 
     if not 1 <= args.port <= 65535:
@@ -18,31 +20,49 @@ def main():
     if args.count < 1:
         parser.error("count must be at least 1")
 
-    if not 1 <= args.size <= 65507:
-        parser.error("size must be between 1 and 65507 bytes")
+    # the metadata header takes 20 bytes
+    if not 20 <= args.size <= 65507:
+        parser.error("size must be between 20 and 65507 bytes")
 
     if args.rate <= 0:
         parser.error("rate must be greater than 0")
-    
-    # we pad the msg so that every packet has the requested payload size
-    message = b"hello from udp client"
-    message=message.ljust(args.size, b"x")
 
-    # rate is in mbps so we need to convert it into bits per s 
+    flow_ids = {"high": 1, "medium": 2, "low": 3, "background": 4} # assign each flow a num id for packet header
+
+    if args.flow not in flow_ids:
+        parser.error("flow must be high, medium, low or background")
+
+    flow_id = flow_ids[args.flow]
+
+    header_format = "!IQq"  # ! -> network byte order(big-endian), I: uint_32 for flowid, Q: uint_64 for seqno and q: 8 byte signed int for timestamp
+    header_size = struct.calcsize(header_format)
+
+    data_size = args.size - header_size
+    data = b"x" * data_size
+
+    # rate is in mbps so we need to convert it into bits per s
     # interval = ratio of the bits per packet and the bits sent per sec
-    interval= (args.size*8)/(args.rate * 1_000_000)
+    interval = (args.size * 8) / (args.rate * 1_000_000)
+    interval_ns = int(interval * 1_000_000_000)
+
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     try:
-        start_time= time.monotonic() # we use a monotonic clock to schedule packets without depending on changes to the system clock
+        start_time = time.monotonic_ns() # we use a monotonic clock to schedule packets without depending on changes to the system clock
+
         for i in range(args.count):
-            sock.sendto(message, (args.ip, args.port))
-            printf(f"sent packet {i+1}/{args.count}")
+            timestamp = time.monotonic_ns()
+            header = struct.pack(header_format, flow_id, i, timestamp)
+            packet = header + data
 
-            next_send= start_time+(i+1)*interval # calc when this packet's sending interval ends
-            delay = next_send - time.monotonic() 
+            sock.sendto(packet, (args.ip, args.port))
+            print(f"sent {args.flow} packet {i}")
 
-            if delay>0 and i+1<args.count: # wait if we are ahead of target schedule
+            # schedule packets at the requested approximate rate
+            next_send = start_time + (i + 1) * interval_ns
+            delay = (next_send - time.monotonic_ns()) / 1_000_000_000
+
+            if delay > 0 and i + 1 < args.count:
                 time.sleep(delay)
 
         print(f"sent {args.count} packets to {args.ip}:{args.port}")
