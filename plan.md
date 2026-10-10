@@ -41,11 +41,12 @@ Analyze fairness
 | Component | Built by | Role |
 |---|---|---|
 | Mininet topology | Script (Python) | Creates hosts and switches, wires them with virtual links, sets bandwidth on the bottleneck link |
-| Sender/Client (`sender.py`) | Runs on sender hosts | Generates UDP traffic for one flow/class: builds packets with flow ID, sequence number, timestamp; sends at a chosen rate |
-| Receiver (`receiver.py`) | Runs on the receiver host | Listens on each flow's port, logs every packet's arrival for later analysis |
+| Sender/Client (`sender.py`) | Runs on sender hosts | Generates UDP traffic for one flow/class: announces the run (START), sends data packets (flow ID, sequence number, run ID, timestamp) at a chosen rate, then announces the end (END + packet count) |
+| Receiver (`receiver.py`) | Runs on the receiver host | One process listening on all four flow ports; answers START/END, tracks each run in memory, and when a run ends hands the totals to `metrics.py` |
 | SDN Controller (Ryu) | Separate process | Talks to the switch over OpenFlow; classifies UDP flows by port; installs/updates priority rules; polls traffic stats |
 | OVS Queues | Configured on the bottleneck port | Give each flow/class a guaranteed minimum and a maximum bandwidth share |
-| Analysis script | Runs after each experiment | Reads receiver logs, computes throughput, latency, loss, fairness |
+| Metrics (`metrics.py`) | Called by the receiver | Computes loss, goodput, latency (mean/p50/p95) per flow per run, plus Jain's fairness; appends to `metrics.csv` / `fairness.csv` |
+| Analysis script (later) | Runs after the experiments | Reads the CSVs and draws the comparison graphs |
 
 ### 1.3 Two separate communication paths
 
@@ -54,18 +55,36 @@ Analyze fairness
 
 The controller never touches your UDP packets directly. It only tells the switch *how* to treat them.
 
-### 1.4 Packet format (used by every flow)
+### 1.4 Packet formats (defined once in `protocol.py`)
+
+There are **two kinds of messages**, both sent over UDP to the flow's port.
+
+**Data packet** (the traffic being measured), 28-byte header (`struct` format `"!IQQq"`):
 
 ```
-┌────────────┬──────────────────┬────────────────┬─────────────────┐
-│ Flow ID    │ Sequence Number  │ Send Timestamp │ Padding (filler) │
-│  1 byte    │     4 bytes      │    8 bytes     │  rest of packet  │
-└────────────┴──────────────────┴────────────────┴─────────────────┘
+┌──────────┬──────────────┬──────────┬─────────────────┬──────────────────┐
+│ Flow ID  │ Sequence no. │  Run ID  │ Send timestamp  │ Padding (filler) │
+│  4 bytes │   8 bytes    │  8 bytes │  8 bytes (ns)   │  size − 28 bytes │
+└──────────┴──────────────┴──────────┴─────────────────┴──────────────────┘
 ```
 
-> Built with `struct.pack('!Bid', flow_id, seq_num, send_time)` in Python; padding bytes appended to reach the target packet size per flow.
+**Control message** (session bookkeeping), exactly 21 bytes (`"!4sBQII"`):
 
-UDP itself gives none of this — no sequence numbers, no ACKs, no retransmission, no reliability. These fields are added purely as **application-level measurement information**. You are not turning UDP into TCP; you're just giving yourself a way to detect loss and measure timing afterward.
+```
+┌──────────────┬──────────┬──────────┬──────────┬───────────────────┐
+│ Magic "QOS1" │ Type     │  Run ID  │ Flow ID  │ Packet count      │
+│   4 bytes    │  1 byte  │  8 bytes │  4 bytes │ 4 bytes           │
+└──────────────┴──────────┴──────────┴──────────┴───────────────────┘
+```
+
+Types: START, END, START_ACK, END_ACK. START and END carry the number of data packets the sender will send / has sent.
+
+
+- Packet size (the `--size` option) is the whole UDP payload **including the 28-byte header**, so the smallest allowed size is 28 bytes.
+
+- UDP itself gives none of this: no sequence numbers, no ACKs, no retransmission, no reliability.
+- These fields are added purely as **application-level measurement information**. 
+- Lost data packets are never retransmitted, because loss is what we are measuring as we are not turning UDP into TCP.
 
 ### 1.5 Flow identity / port mapping
 
@@ -135,9 +154,9 @@ Understand as you go: what a UDP socket/IP/port is, what `sendto()`/`recvfrom()`
 - **Step 2.6 — Measure latency:** `received time − sent time`, per packet.
 
 **✅ Phase 2 checkpoint — before moving on, confirm:**
-- [ ] Traffic generator produces 3-4 distinct flows on distinct ports
-- [ ] Receiver logs every flow and correctly detects gaps in sequence numbers
-- [ ] You can print throughput, latency, and packet loss per flow
+- [x] Traffic generator produces 3-4 distinct flows on distinct ports
+- [x] Receiver logs every flow and correctly detects gaps in sequence numbers
+- [x] You can print throughput, latency, and packet loss per flow
 
 ### PHASE 3 — Mininet Network (still no SDN)
 
@@ -145,8 +164,8 @@ Understand as you go: what a UDP socket/IP/port is, what `sendto()`/`recvfrom()`
 
 - **Step 3.1 — Start with a simple topology:** `h1 ── s1 ── h2`. Learn to create hosts/switches, connect them, assign IPs, run commands on hosts. Verify with `h1 ping h2` before anything else.
 - **Step 3.2 — Run your UDP application inside Mininet:** h1 = traffic generator, h2 = UDP server, traffic now flows through the emulated switch instead of localhost.
-- **Step 3.3 — Create a bottleneck:** extend to `h1 ── s1 ══(5 Mbps)══ s2 ── h2`, where the `s1-s2` link is deliberately bandwidth-limited.
-- **Step 3.4 — Create controlled congestion:** make total flow demand exceed the bottleneck capacity (e.g., four flows at 3 Mbps each = 12 Mbps demand vs. a 5 Mbps link). This forces flows to compete for a limited resource, producing real loss and delay.
+- **Step 3.3 — Create a bottleneck:** extend to the project topology `h1, h2, h3 ── s1 ══(5 Mbps)══ s2 ── h4`, where the `s1-s2` link is deliberately bandwidth-limited (bottleneck port on s1 is `s1-eth4`).
+- **Step 3.4 — Create controlled congestion:** make total flow demand exceed the bottleneck capacity (the four flows add up to 1 + 2 + 3 + 4 = 10 Mbps of demand vs. a 5 Mbps link). This forces flows to compete for a limited resource, producing real loss and delay.
 - **Step 3.5 — Measure BEFORE SDN (critical):** run the congested scenario with no SDN priority at all, and record throughput/latency/loss per flow. Save these numbers — this is your baseline for every later comparison.
 
 **✅ Pre-SDN checkpoint — before touching the controller, you should be able to demonstrate:** basic UDP client/server, multiple UDP flows, port-based classification, sequence numbers, throughput/latency/loss measurement, a working Mininet topology, a controlled bottleneck, real congestion (demand > capacity), and saved baseline (no-SDN) results.
@@ -248,10 +267,10 @@ The "Shared" row is deliberate — the rubric rewards integration and viva under
 
 **D1 tasks (target: half of Mininet + SDN Implementation)**
 - [ ] `topology.py`: hosts, switch(es), bottleneck link with bandwidth cap via `TCLink` (Phase 3.1-3.3)
-- [ ] `RemoteController` configured, pointing at the Ryu controller
+- [ ] `RemoteController` configured, pointing at the Ryu controller (keep a no-controller mode in `topology.py` for the first tests)
 - [ ] Verified with `pingall` — all hosts reachable
 - [ ] Controlled congestion set up: flow demand exceeding bottleneck capacity (Phase 3.4)
-- [ ] Baseline (no-SDN) measurements recorded and saved (Phase 3.5) — critical, do this before SDN work starts
+- [ ] Baseline (no-SDN) measurements recorded and saved (Phase 3.5) — critical, do this before SDN work starts. Run it through C's forwarding-only controller with the same bandwidth and queue settings you will use later, 3 runs per scenario, and record which `run_id` is which scenario
 
 **D1 shared contribution**
 - [ ] Run `sender.py`/`receiver.py` inside Mininet hosts with Person A (Socket–SDN Integration)
@@ -325,27 +344,35 @@ The "Shared" row is deliberate — the rubric rewards integration and viva under
 ## 8. Quick Reference: Commands You'll Use Often
 
 ```bash
-# Inside Mininet CLI, start receivers first (background), then senders
-h2 python3 receiver.py --port 5001 --out flow1.csv &
-h2 python3 receiver.py --port 5002 --out flow2.csv &
-h2 python3 receiver.py --port 5003 --out flow3.csv &
-h1 python3 sender.py --flow_id 1 --dst_ip 10.0.0.2 --dst_port 5001 --packet_size 200  --rate 1  --duration 30
-h1 python3 sender.py --flow_id 2 --dst_ip 10.0.0.2 --dst_port 5002 --packet_size 500  --rate 2  --duration 30
-h1 python3 sender.py --flow_id 3 --dst_ip 10.0.0.2 --dst_port 5003 --packet_size 1000 --rate 3  --duration 30
+# --- first tests, one machine, no Mininet (two terminals) ---
+python3 receiver.py                                              # terminal 1: listens on 5001-5004
+python3 sender.py --flow high --size 200 --rate 1 --count 1000   # terminal 2
 
-# Check controller's installed rules and their hit-counters
+# --- inside the Mininet CLI: start the receiver first, then all senders with the SAME --run-id ---
+h4 python3 receiver.py > /tmp/recv.log 2>&1 &
+h1 python3 sender.py --ip 10.0.0.4 --flow high       --size 200  --rate 1 --count 18750 --run-id 1 &
+h2 python3 sender.py --ip 10.0.0.4 --flow medium     --size 500  --rate 2 --count 15000 --run-id 1 &
+h3 python3 sender.py --ip 10.0.0.4 --flow low        --size 1000 --rate 3 --count 11250 --run-id 1 &
+h3 python3 sender.py --ip 10.0.0.4 --flow background --size 1400 --rate 4 --count 10714 --run-id 1 &
+# counts above = 30 seconds of traffic:  count = rate * 1e6 * seconds / (size * 8)
+
+# results: one row per flow per run in metrics.csv (next to metrics.py); fairness.csv when all 4 flows finished
+
+# Check the controller's installed rules and their hit-counters
 ovs-ofctl -O OpenFlow13 dump-flows s1
 
-# Check per-queue stats on the bottleneck port
-tc -s class show dev s1-eth2
+# Check queue / drop stats on the bottleneck port (s1-eth4 in the 3-sender topology)
+tc -s qdisc show dev s1-eth4
+tc -s class show dev s1-eth4
 
-# Verify bottleneck bandwidth
-h1 iperf -u -c 10.0.0.2 -b 20M
+# Verify bottleneck bandwidth (start the iperf server on h4 first)
+h4 iperf -s -u -i 1 &
+h1 iperf -u -c 10.0.0.4 -b 20M -t 10
 ```
 
 ---
 
-## 9. First Milestone (start here)
+## 9. First Milestone (done)
 
 Do not start with Mininet or Ryu. Your very first mini-project is just:
 
@@ -367,3 +394,57 @@ Throughput:         XX Mbps
 Once this works, move to multiple UDP flows (Phase 2).
 
 **Key idea to remember:** the project is layers built one at a time — basic UDP → multiple flows → measurements → Mininet → congestion → baseline → *then* SDN control, priority, and dynamic policies on top. If a layer doesn't work yet, don't build the next one on top of it.
+
+---
+
+## 10. Next Milestone — Mininet Network with Bottleneck 
+
+Milestone 1 (basic UDP application) is done. The next milestone runs the application inside an emulated network with a shared bottleneck, **still without priority**. This finishes D1.
+
+```text
+h1 ──┐
+h2 ──┼── s1 ═══ 5 Mbps ═══ s2 ── h4 (UDP receiver)
+h3 ──┘
+```
+
+### Topology (`mininet/topology.py`)
+
+- Create hosts h1, h2, h3, h4 (10.0.0.1 – 10.0.0.4) and switches s1, s2.
+- Connect h1, h2, h3 to s1, h4 to s2, and s1–s2 as the 5 Mbps bottleneck (port `s1-eth4`).
+- Support two modes: no controller (first tests) and `RemoteController` pointing at Ryu.
+- Keep the bottleneck queue short (about 100 packets).
+
+### Bottleneck Check
+
+- Verify the cap with iperf (send 20 Mbps over UDP, expect about 5 Mbps received).
+- Check early whether the `TCLink` cap and OVS queues can share the bottleneck port. If not, make the 5 Mbps cap with the OVS queue instead, and write the decision down.
+
+### Running the UDP Application
+
+- Start the receiver on h4 and the senders on h1, h2 and h3 (h3 runs both low and background).
+- Use `--ip 10.0.0.4` and the **same `--run-id`** for all four senders.
+- Set `--count` from the wanted duration: `count = rate × 1e6 × seconds / (size × 8)`.
+
+### Experiment Runner (`mininet/run_experiment.py`)
+
+
+- Run one scenario with one command: *no congestion* (flows 1 and 2) or *congestion* (all four).
+- Start the receiver first, wait for the senders to finish plus about 2 s, then stop the receiver.
+- Record which `run_id` belongs to which scenario in a small manifest file.
+
+### Baseline
+
+- Run each scenario 3 times and confirm: demand (10 Mbps) exceeds capacity (5 Mbps), every flow loses packets, total throughput is about 5 Mbps.
+- Repeat through Person C's forwarding-only controller, then save the baseline.
+
+### Completion Checklist
+
+- [ ] `pingall` works (no-controller mode and with Ryu)
+- [ ] iperf confirms about 5 Mbps
+- [ ] Receiver on h4 receives from h1, h2 and h3
+- [ ] Demand (10 Mbps) > capacity (5 Mbps), all flows lose packets
+- [ ] `run_experiment.py` runs a scenario with one command
+- [ ] Baseline saved (3 runs per scenario)
+- [ ] TCLink vs. OVS-queue decision written down
+
+---
