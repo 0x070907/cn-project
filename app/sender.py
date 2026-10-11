@@ -1,3 +1,4 @@
+from __future__ import annotations
 
 import argparse
 import socket
@@ -7,7 +8,18 @@ import secrets
 import protocol
 
 
-def main():
+class Args(argparse.Namespace):
+    # typed view of the command line arguments defined in main()
+    ip: str
+    run_id: int | None
+    port: int | None
+    count: int
+    size: int
+    rate: float
+    flow: str
+
+
+def main() -> None:
     parser = argparse.ArgumentParser(description="udp sender")
     parser.add_argument("--ip", default="127.0.0.1")
     parser.add_argument("--run-id", type=int, default=None)
@@ -16,13 +28,13 @@ def main():
     parser.add_argument("--size", type=int, default=200)
     parser.add_argument("--rate", type=float, default=0.1)
     parser.add_argument("--flow", default="high")
-    args = parser.parse_args()
+    args = parser.parse_args(namespace=Args())
 
     if args.flow not in protocol.flow_ids:
         parser.error("flow must be high, medium, low or background")
 
-    flow_id = protocol.flow_ids[args.flow]
-    port = args.port if args.port is not None else protocol.flow_ports[flow_id]
+    flow_id: int = protocol.flow_ids[args.flow]
+    port: int = args.port if args.port is not None else protocol.flow_ports[flow_id]
 
     if not 1 <= port <= 65535:
         parser.error("port must be between 1 and 65535")
@@ -41,21 +53,21 @@ def main():
     if args.rate <= 0:
         parser.error("rate must be greater than 0")
 
-    data = b"x" * (args.size - protocol.data_header_size)
+    data: bytes = b"x" * (args.size - protocol.data_header_size)
 
     # rate is in mbps so we need to convert it into bits per s
     # interval = ratio of the bits per packet and the bits sent per sec
-    interval = (args.size * 8) / (args.rate * 1_000_000)
-    interval_ns = int(interval * 1_000_000_000)
+    interval: float = (args.size * 8) / (args.rate * 1_000_000)
+    interval_ns: int = int(interval * 1_000_000_000)
 
-    run_id = args.run_id if args.run_id is not None else secrets.randbits(64) # this preserves our old behaviour when we dont specify --run-id on cli
-    server = (args.ip, port)
+    run_id: int = args.run_id if args.run_id is not None else secrets.randbits(64) # this preserves our old behaviour when we dont specify --run-id on cli
+    server: tuple[str, int] = (args.ip, port)
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(0.5)
 
-    def send_control(message_type, expected_ack):
-        message = protocol.pack_control(
+    def send_control(message_type: int, expected_ack: int) -> bool:
+        message: bytes = protocol.pack_control(
             message_type, run_id, flow_id, args.count
         )
 
@@ -68,7 +80,7 @@ def main():
             except socket.timeout:
                 continue
 
-            control = protocol.unpack_control(response)
+            control: tuple[int, int, int, int] | None = protocol.unpack_control(response)
 
             if (
                 addr == server
@@ -89,12 +101,12 @@ def main():
 
         print(f"started run {run_id} for {args.flow}")
 
-        start_time = time.monotonic_ns()
+        start_time: int = time.monotonic_ns()
 
         for i in range(args.count):
-            timestamp = time.monotonic_ns()
+            timestamp: int = time.monotonic_ns()
 
-            packet = protocol.pack_data(
+            packet: bytes = protocol.pack_data(
                 flow_id, i, run_id, timestamp, data
             )
 
@@ -102,8 +114,8 @@ def main():
             print(f"sent {args.flow} packet {i}")
 
             # schedule packets at the requested approximate rate
-            next_send = start_time + (i + 1) * interval_ns
-            delay = (next_send - time.monotonic_ns()) / 1_000_000_000
+            next_send: int = start_time + (i + 1) * interval_ns
+            delay: float = (next_send - time.monotonic_ns()) / 1_000_000_000
 
             if delay > 0 and i + 1 < args.count:
                 time.sleep(delay)
