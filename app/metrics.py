@@ -1,11 +1,15 @@
+# this lets type hints like tuple[int, int] ; int | None ; etc... work on python versions older than 3.10 ,the old way was Tuple[int, int]; Optional[int]  from the typing module. it has no effect on how the program runs
+from __future__ import annotations
+
 import csv
 import statistics
 import time
+from collections.abc import Collection, Iterable, Sequence
 from pathlib import Path
 # imp (fix this later when done with the full thingy):  currently we assume that the sender and receivers monotonic clocks share the same time base, it works for localhost setup but may not work for mininet  
 csv_path = Path(__file__).with_name("metrics.csv")
 
-fields = [
+fields: list[str] = [
     "experiment_id",
     "run_id",
     "flow",
@@ -24,7 +28,8 @@ fields = [
 ]
 
 
-def percentile(values, p):
+# Sequence can be indexed or len() works,so it needs an ordered thing like a list. a set would not work
+def percentile(values: Sequence[float], p: float) -> float | None:
     if not values:
         return None
 
@@ -34,17 +39,17 @@ def percentile(values, p):
 
 
 def record_run(
-    experiment_id,
-    run_id,
-    flow,
-    expected_packets,
-    sequences,
-    duplicates,
-    out_of_order,
-    payload_bytes,
-    duration_seconds,
-    latencies_ns,
-):
+    experiment_id: str,
+    run_id: int,
+    flow: str,
+    expected_packets: int,
+    sequences: Collection[int],  # Collection: only len() is used. the receiver passes a set, which is not a Sequence
+    duplicates: int,
+    out_of_order: int,
+    payload_bytes: int,
+    duration_seconds: float,
+    latencies_ns: Iterable[int],  # Iterable: it is only looped over once (the list comprehension below)
+) -> None:
     # only unique sequence numbers count as successfully received packets
     unique_received = len(sequences)
     lost_packets = max(0, expected_packets - unique_received)
@@ -67,7 +72,7 @@ def record_run(
         if latency >= 0
     ]
 
-    row = {
+    row: dict[str, str | int | float] = {
         "experiment_id": experiment_id,
         "run_id": run_id,
         "flow": flow,
@@ -107,7 +112,8 @@ def record_run(
 
     print(f"saved metrics for {flow} run {run_id}")
 
-def jains_fairness(throughputs):
+# Collection: needs len() and has to loop over the values several times,so a single lookup Iterable like a generator would not be safe. it never indexes, so no Sequence needed
+def jains_fairness(throughputs: Collection[float]) -> float | None:
     # fairness is undefined if every flow has zero throughput
     if not throughputs or sum(x*x for x in throughputs) == 0:
         return None
@@ -118,15 +124,16 @@ def jains_fairness(throughputs):
     )
 
 
-def record_fairness(experiment_id, throughputs):  # saves the results by calling jains_fairness func internally and then saves the individual flow throughputs and the calc score into fairness.csv
-    fairness = jains_fairness(list(throughputs.values()))
+def record_fairness(experiment_id: str, throughputs: dict[str, float]) -> None:  # saves the results by calling jains_fairness func internally and then saves the individual flow throughputs and the calc score into fairness.csv
+
+    fairness : list[float] = jains_fairness(list(throughputs.values()))
 
     if fairness is None:
         print("cannot calculate fairness when all flows have zero throughput")
         return
 
     path = csv_path.with_name("fairness.csv")
-    fields = [
+    fields: list[str] = [
         "experiment_id",
         "high_mbps",
         "medium_mbps",
@@ -135,7 +142,7 @@ def record_fairness(experiment_id, throughputs):  # saves the results by calling
         "jains_fairness",
     ]
 
-    row = {
+    row: dict[str, str | float] = {
         "experiment_id": experiment_id,
         "high_mbps": throughputs.get("high", 0),
         "medium_mbps": throughputs.get("medium", 0),
