@@ -29,6 +29,8 @@ def main() -> None:
     sockets: dict[socket.socket, int] = {}
     runs: dict[tuple[int, int], RunState] = {}
     completed_throughputs: dict[str, dict[str, float]] = {}
+    # flow names that announced a START for each experiment, so fairness waits for them all
+    started_flows: dict[str, set[str]] = {}
     fairness_recorded: set[str] = set()
     grace_period: float = 1.0
 
@@ -97,6 +99,11 @@ def main() -> None:
 
                         elif runs[key]["expected"] != count:
                             continue
+
+                        # remember this flow is part of the experiment so fairness waits for it
+                        started_flows.setdefault(str(run_id), set()).add(
+                            flow_names[flow_id]
+                        )
 
                         # acknowledge the start so the sender can begin transmitting
                         sock.sendto(
@@ -251,12 +258,14 @@ def main() -> None:
                         goodput_mbps
                     )
 
-                    # calculate fairness once all four flows have completed
+                    # calculate fairness once every flow that announced this
+                    # run has completed and had its throughput recorded
                     throughputs = completed_throughputs[experiment_id]
+                    expected_flows = started_flows.get(experiment_id, set())
 
                     if (
-                        set(throughputs)
-                        == {"high", "medium", "low", "background"}
+                        len(expected_flows) >= 2
+                        and expected_flows <= set(throughputs)
                         and experiment_id not in fairness_recorded
                     ):
                         metrics.record_fairness(experiment_id, throughputs)
