@@ -1,29 +1,47 @@
+from __future__ import annotations
+
 import socket
 import select
 import time
+from typing import TypedDict
 
 import protocol
 import metrics
 
+# this class hints the type checker(mypy) what each value of the runs dict is,keyed by per (run_id, flow_id)
+# a TypedDict is still a normal dict at runtime
+class RunState(TypedDict):
+    
+    expected: int
+    sequences: set[int]
+    last_sequence: int
+    started_at: int | None  # None until the first data packet arrives (time.monotonic_ns())
+    ended_at: float | None  # None until the end message arrives (time.monotonic(), in seconds)
+    ended_at_ns: int | None  # same moment as ended_at but in nanoseconds
+    payload_bytes: int
+    latencies_ns: list[int]
+    duplicates: int
+    out_of_order: int
 
-def main():
-    ports = protocol.flow_ports
-    sockets = {}
-    runs = {}
-    completed_throughputs = {}
-    fairness_recorded = set()
-    grace_period = 1.0
+
+def main() -> None:
+    ports: dict[int, int] = protocol.flow_ports
+    sockets: dict[socket.socket, int] = {}
+    runs: dict[tuple[int, int], RunState] = {}
+    completed_throughputs: dict[str, dict[str, float]] = {}
+    fairness_recorded: set[str] = set()
+    grace_period: float = 1.0
 
     # map flow IDs back to their names for printing
-    flow_names = {
+    flow_names: dict[int, str] = {
         flow_id: name for name, flow_id in protocol.flow_ids.items()
     }
 
     # keep track of packets received across all runs for the final summary
-    received = {flow_id: 0 for flow_id in ports}
-    duplicates = {flow_id: 0 for flow_id in ports}
-    out_of_order = {flow_id: 0 for flow_id in ports}
-    last_sequence = {flow_id: -1 for flow_id in ports}
+    received: dict[int, int] = {flow_id: 0 for flow_id in ports}
+    duplicates: dict[int, int] = {flow_id: 0 for flow_id in ports}
+    out_of_order: dict[int, int] = {flow_id: 0 for flow_id in ports}
+    last_sequence: dict[int, int] = {flow_id: -1 for flow_id in ports}
 
     try:
         # create one socket for each traffic flow

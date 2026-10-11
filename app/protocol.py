@@ -1,14 +1,15 @@
-
+from __future__ import annotations 
+ 
 import struct
 
-flow_ids = {
+flow_ids: dict[str, int] = {
     "high": 1,
     "medium": 2,
     "low": 3,
     "background": 4
 }
 
-flow_ports = {
+flow_ports: dict[int, int] = {
     1: 5001,
     2: 5002,
     3: 5003,
@@ -22,8 +23,8 @@ flow_ports = {
  Q is an 8 byte unsigned integer for run id
  q is an 8 byte signed integer for timestamp"""
 
-data_format = "!IQQq"
-data_header_size = struct.calcsize(data_format)
+data_format: str = "!IQQq"
+data_header_size: int = struct.calcsize(data_format)
 
 # control messages use a separate format from data packets
 # ! means network byte order (big-endian)
@@ -32,17 +33,24 @@ data_header_size = struct.calcsize(data_format)
 # Q is an 8 byte unsigned integer for run id
 # I is a 4 byte unsigned integer for flow id
 # I is a 4 byte unsigned integer for expected packet count
-control_format = "!4sBQII"
-control_header_size = struct.calcsize(control_format)
-magic = b"QOS1"
+control_format: str = "!4sBQII"
+control_header_size: int = struct.calcsize(control_format)
+magic: bytes = b"QOS1"
 
-start_message = 1
-end_message = 2
-start_ack = 3
-end_ack = 4
+start_message: int = 1
+end_message: int = 2
+start_ack: int = 3
+end_ack: int = 4
 
 
-def pack_data(flow_id, sequence_number, run_id, timestamp, payload):
+def pack_data(
+    flow_id: int,
+    sequence_number: int,
+    run_id: int,
+    timestamp: int,
+    payload: bytes,
+) -> bytes:
+
     header = struct.pack(
         data_format,
         flow_id,
@@ -53,7 +61,8 @@ def pack_data(flow_id, sequence_number, run_id, timestamp, payload):
     return header + payload
 
 
-def unpack_data(packet):
+def unpack_data(packet: bytes) -> tuple[int, int, int, int, bytes]: # for tuples you need to always specify the type of all elements,so it can't be tuple[int | bytes]
+
     if len(packet) < data_header_size:
         raise ValueError("packet is too small")
 
@@ -67,7 +76,13 @@ def unpack_data(packet):
     return flow_id, sequence_number, run_id, timestamp, payload
 
 
-def pack_control(message_type, run_id, flow_id, count):
+def pack_control(
+    message_type: int, 
+    run_id: int,
+    flow_id: int,
+    count: int
+) -> bytes:
+
     return struct.pack(
         control_format,
         magic,
@@ -78,7 +93,8 @@ def pack_control(message_type, run_id, flow_id, count):
     )
 
 
-def unpack_control(packet):
+def unpack_control(packet: bytes) -> tuple[int, int, int, int] | None: 
+
     if len(packet) != control_header_size:
         return None
 
