@@ -135,7 +135,7 @@ def jains_fairness(throughputs: Collection[float]) -> float | None:
 
 def record_fairness(experiment_id: str, throughputs: dict[str, float]) -> None:  # saves the results by calling jains_fairness func internally and then saves the individual flow throughputs and the calc score into fairness.csv
 
-    fairness : list[float] = jains_fairness(list(throughputs.values()))
+    fairness : float | None = jains_fairness(list(throughputs.values()))
 
     if fairness is None:
         print("cannot calculate fairness when all flows have zero throughput")
