@@ -7,7 +7,11 @@ import time
 from collections.abc import Collection, Iterable, Sequence
 from pathlib import Path
 # imp (fix this later when done with the full thingy):  currently we assume that the sender and receivers monotonic clocks share the same time base, it works for localhost setup but may not work for mininet  
-csv_path = Path(__file__).with_name("metrics.csv")
+
+# results go in results/, one level above app/, no matter where the script is run from
+results_dir = Path(__file__).resolve().parent.parent / "results"
+csv_path = results_dir / "metrics.csv"
+fairness_path = results_dir / "fairness.csv"
 
 fields: list[str] = [
     "experiment_id",
@@ -50,6 +54,7 @@ def record_run(
     duration_seconds: float,
     latencies_ns: Iterable[int],  # Iterable: it is only looped over once (the list comprehension below)
 ) -> None:
+    
     # only unique sequence numbers count as successfully received packets
     unique_received = len(sequences)
     lost_packets = max(0, expected_packets - unique_received)
@@ -100,6 +105,7 @@ def record_run(
     }
 
     # then we uh append each completed run without overwriting previous results
+    results_dir.mkdir(parents=True, exist_ok=True)  # create results/ on first write
     file_exists = csv_path.exists() and csv_path.stat().st_size > 0
 
     with csv_path.open("a", newline="") as file:
@@ -114,6 +120,7 @@ def record_run(
 
 # Collection: needs len() and has to loop over the values several times,so a single lookup Iterable like a generator would not be safe. it never indexes, so no Sequence needed
 def jains_fairness(throughputs: Collection[float]) -> float | None:
+    
     # fairness is undefined if every flow has zero throughput
     if not throughputs or sum(x*x for x in throughputs) == 0:
         return None
@@ -132,7 +139,8 @@ def record_fairness(experiment_id: str, throughputs: dict[str, float]) -> None: 
         print("cannot calculate fairness when all flows have zero throughput")
         return
 
-    path = csv_path.with_name("fairness.csv")
+    path = fairness_path
+    
     fields: list[str] = [
         "experiment_id",
         "high_mbps",
@@ -151,6 +159,7 @@ def record_fairness(experiment_id: str, throughputs: dict[str, float]) -> None: 
         "jains_fairness": round(fairness, 6),
     }
 
+    results_dir.mkdir(parents=True, exist_ok=True)
     file_exists = path.exists() and path.stat().st_size > 0
 
     with path.open("a", newline="") as file:
