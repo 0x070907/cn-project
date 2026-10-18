@@ -9,9 +9,9 @@ from pathlib import Path
 # imp (fix this later when done with the full thingy):  currently we assume that the sender and receivers monotonic clocks share the same time base, it works for localhost setup but may not work for mininet  
 
 # results go in results/, one level above app/, no matter where the script is run from
-results_dir = Path(__file__).resolve().parent.parent / "results"
-csv_path = results_dir / "metrics.csv"
-fairness_path = results_dir / "fairness.csv"
+results_dir : Path = Path(__file__).resolve().parent.parent / "results"
+csv_path : Path = results_dir / "metrics.csv"
+fairness_path : Path = results_dir / "fairness.csv"
 
 fields: list[str] = [
     "experiment_id",
@@ -71,7 +71,7 @@ def record_run(
         goodput_mbps = 0.0
 
     # we convert latency samples from nanoseconds to milliseconds
-    latencies_ms = [
+    latencies_ms : list[float] = [
         latency / 1_000_000
         for latency in latencies_ns
         if latency >= 0
@@ -133,13 +133,13 @@ def jains_fairness(throughputs: Collection[float]) -> float | None:
 
 def record_fairness(experiment_id: str, throughputs: dict[str, float]) -> None:  # saves the results by calling jains_fairness func internally and then saves the individual flow throughputs and the calc score into fairness.csv
 
-    fairness : list[float] = jains_fairness(list(throughputs.values()))
+    fairness : float | None = jains_fairness(list(throughputs.values()))
 
     if fairness is None:
         print("cannot calculate fairness when all flows have zero throughput")
         return
 
-    path = fairness_path
+    path : Path = fairness_path
     
     fields: list[str] = [
         "experiment_id",
