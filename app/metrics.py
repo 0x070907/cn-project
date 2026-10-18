@@ -9,10 +9,11 @@ from pathlib import Path
 # imp (fix this later when done with the full thingy):  currently we assume that the sender and receivers monotonic clocks share the same time base, it works for localhost setup but may not work for mininet  
 
 # results go in results/, one level above app/, no matter where the script is run from
-results_dir : Path = Path(__file__).resolve().parent.parent / "results"
-csv_path : Path = results_dir / "metrics.csv"
-fairness_path : Path = results_dir / "fairness.csv"
+results_dir = Path(__file__).resolve().parent.parent / "results"
+csv_path = results_dir / "metrics.csv"
+fairness_path = results_dir / "fairness.csv"
 
+# column order of metrics.csv: one row per flow per run
 fields: list[str] = [
     "experiment_id",
     "run_id",
@@ -34,6 +35,8 @@ fields: list[str] = [
 
 # Sequence can be indexed or len() works,so it needs an ordered thing like a list. a set would not work
 def percentile(values: Sequence[float], p: float) -> float | None:
+    # nearest-rank percentile: the smallest value that at least p% of the samples are <= to (e.g. p95 = 95% of packets were faster than this)
+
     if not values:
         return None
 
@@ -64,14 +67,14 @@ def record_run(
     else:
         packet_loss_pct = 0.0
 
-    # goodput measures useful payload delivered per second
+    # goodput measures useful payload delivered per second (headers excluded, so it sits slightly below the sending rate)
     if duration_seconds > 0:
         goodput_mbps = payload_bytes * 8 / duration_seconds / 1_000_000
     else:
         goodput_mbps = 0.0
 
     # we convert latency samples from nanoseconds to milliseconds
-    latencies_ms : list[float] = [
+    latencies_ms = [
         latency / 1_000_000
         for latency in latencies_ns
         if latency >= 0
@@ -120,26 +123,25 @@ def record_run(
 
 # Collection: needs len() and has to loop over the values several times,so a single lookup Iterable like a generator would not be safe. it never indexes, so no Sequence needed
 def jains_fairness(throughputs: Collection[float]) -> float | None:
-    
+
     # fairness is undefined if every flow has zero throughput
     if not throughputs or sum(x*x for x in throughputs) == 0:
         return None
 
     total = sum(throughputs)
-    return total * total / (
-        len(throughputs) * sum(x*x for x in throughputs)
-    )
+    return total * total / ( len(throughputs) * sum(x*x for x in throughputs) )
+    # Jain's index J = (sum x)^2 / (n * sum x^2): 1 means every flow got the same, 1/n means one flow took everything
 
 
 def record_fairness(experiment_id: str, throughputs: dict[str, float]) -> None:  # saves the results by calling jains_fairness func internally and then saves the individual flow throughputs and the calc score into fairness.csv
 
-    fairness : float | None = jains_fairness(list(throughputs.values()))
+    fairness : list[float] = jains_fairness(list(throughputs.values()))
 
     if fairness is None:
         print("cannot calculate fairness when all flows have zero throughput")
         return
 
-    path : Path = fairness_path
+    path = fairness_path  # one row per experiment (all four flows together), unlike metrics.csv which has one row per flow
     
     fields: list[str] = [
         "experiment_id",

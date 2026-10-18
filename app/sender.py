@@ -1,3 +1,8 @@
+"""UDP sender: generates ONE flow per process."""
+
+# sequence of a run: START (retried until acked) -> N data packets paced at --rate (never retried) -> END (retried until acked)
+# to make an experiment with 4 flows, start 4 senders that all use the SAME --run-id.
+
 from __future__ import annotations
 
 import argparse
@@ -23,7 +28,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="udp sender")
     parser.add_argument("--ip", default="127.0.0.1")
     parser.add_argument("--run-id", type=int, default=None)
-    parser.add_argument("--port", type=int)
+    parser.add_argument("--port", type=int)  #tho there's no default value,it fallbacks to 5001 itself
     parser.add_argument("--count", type=int, default=10)
     parser.add_argument("--size", type=int, default=200)
     parser.add_argument("--rate", type=float, default=0.1)
@@ -39,6 +44,7 @@ def main() -> None:
     if not 1 <= port <= 65535:
         parser.error("port must be between 1 and 65535")
 
+    # the receiver identifies the flow by port, so the port and flow name must agree
     if port != protocol.flow_ports[flow_id]:
         parser.error("port does not match the selected flow")
 
@@ -53,6 +59,7 @@ def main() -> None:
     if args.rate <= 0:
         parser.error("rate must be greater than 0")
 
+    # --size is the whole datagram, so the filler is the size minus the 28-byte header
     data: bytes = b"x" * (args.size - protocol.data_header_size)
 
     # rate is in mbps so we need to convert it into bits per s
@@ -66,7 +73,12 @@ def main() -> None:
     sock: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(0.5)
 
+
+    # sends a START or END and waits for the matching ACK, resending up to 5 times (0.5s timeout each)
+    # control messages are retried because losing one would ruin the run
+    # data packets are NOT retried since loss is what we measure
     def send_control(message_type: int, expected_ack: int) -> bool:
+        
         message: bytes = protocol.pack_control(
             message_type, run_id, flow_id, args.count
         )
@@ -82,6 +94,7 @@ def main() -> None:
 
             control: tuple[int, int, int, int] | None = protocol.unpack_control(response)
 
+            # only accept an ACK that came from the receiver and matches this run, flow and count
             if (
                 addr == server
                 and control is not None
@@ -101,6 +114,7 @@ def main() -> None:
 
         print(f"started run {run_id} for {args.flow}")
 
+        # the pacing clock starts only after START is acknowledged
         start_time: int = time.monotonic_ns()
 
         for i in range(args.count):
@@ -114,11 +128,12 @@ def main() -> None:
             print(f"sent {args.flow} packet {i}")
 
             # schedule packets at the requested approximate rate
+            # rate is used to calculate interval,which is helping in the pace control
             next_send: int = start_time + (i + 1) * interval_ns
             delay: float = (next_send - time.monotonic_ns()) / 1_000_000_000
 
             if delay > 0 and i + 1 < args.count:
-                time.sleep(delay)
+                time.sleep(delay) # responsible for gap b/w packets
 
         if send_control(protocol.end_message, protocol.end_ack):
             print(f"finished run {run_id}")
