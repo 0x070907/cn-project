@@ -121,16 +121,17 @@ def main() -> None:
                             address,
                         )
 
-                    elif message_type == protocol.end_message: # END: stores the final count and the time it arrived, then sends END_ACK.
+                    elif message_type == protocol.end_message: # END: validates the final packet count, records end time , then sends END_ACK.
 
                         if key not in runs:
                             continue
 
                         # we remember when the run ended & how many packets need to arrive,so late packets can still arrive 
                         # this count is what makes loss detectable
-                        runs[key]["expected"] = count
+                        if runs[key]["expected"] != count:
+                            continue
 
-                        # only record the end time once, a retried END must not push the deadline back
+                        # only record the end time once, a retried END must not extend the grace period
                         if runs[key]["ended_at"] is None:
                             runs[key]["ended_at"] = now
                             runs[key]["ended_at_ns"] = time.monotonic_ns()
