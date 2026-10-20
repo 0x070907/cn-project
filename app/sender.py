@@ -59,6 +59,9 @@ def main() -> None:
     if args.rate <= 0:
         parser.error("rate must be greater than 0")
 
+    if args.run_id is not None and not 0 <= args.run_id <= 2**64 - 1:
+        parser.error("run_id must be between 0 and 2^64-1")
+
     # --size is the whole datagram, so the filler is the size minus the 28-byte header
     data: bytes = b"x" * (args.size - protocol.data_header_size)
 
