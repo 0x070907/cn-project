@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import argparse
 import socket
 import select
 import time
@@ -31,12 +32,21 @@ class RunState(TypedDict):
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--expected-flows",
+        type=int,
+        choices=range(1, len(protocol.flow_ids) + 1),
+        default=len(protocol.flow_ids),
+        help="Number of flows expected in each experiment",
+    )
+    expected_flows = parser.parse_args().expected_flows
     ports: dict[int, int] = protocol.flow_ports
     sockets: dict[socket.socket, int] = {}                    #socket object -> flow_id,the port a packet arrives on tells us its flow
     runs: dict[tuple[int, int], RunState] = {}                #(run_id, flow_id) -> scoreboard of runs still in progress
     # experiment_id -> {flow name: goodput in mbps}, filled as each flow of an experiment finishe,needed for fairness
     completed_throughputs: dict[str, dict[str, float]] = {}
-    fairness_recorded: set[str] = set()                       # experiments whose fairness row is already written, so we never write it twice
+    fairness_recorded: set[str] = set()     # experiments whose fairness row is already written, so we never write it twice
     grace_period: float = 1.0                                 #1 sec to wait after END before finalising,bcz UDP packets may arrive late
 
     # map flow IDs back to their names for printing
@@ -280,7 +290,7 @@ def main() -> None:
                     throughputs = completed_throughputs[experiment_id]
 
                     if (
-                        len(throughputs) >= 2
+                        len(throughputs) >= expected_flows
                         and experiment_id not in fairness_recorded
                     ):
                         metrics.record_fairness(experiment_id, throughputs)
