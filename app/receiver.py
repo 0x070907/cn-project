@@ -1,8 +1,8 @@
 """UDP receiver """
 
-"""listen on 4 UDP ports (one per flow) -> for every datagram decide whether it is a
-control message (START / END) or a data packet -> keep a scoreboard per (run_id, flow_id)
--> one second after END arrives, hand the scoreboard to metrics.py, which writes the CSVs."""
+# listen on 4 UDP ports (one per flow) -> for every datagram decide whether it is a
+# control message (START / END) or a data packet -> keep a scoreboard per (run_id, flow_id)
+# -> one second after END arrives, hand the scoreboard to metrics.py, which writes the CSVs.
 
 from __future__ import annotations
 
