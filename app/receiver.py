@@ -276,12 +276,11 @@ def main() -> None:
                         goodput_mbps
                     )
 
-                    # calculate fairness once all four flows have completed as it compares the four flows against each other
+                    # calculate fairness once at least two flows in the experiment have completed
                     throughputs = completed_throughputs[experiment_id]
 
                     if (
-                        set(throughputs)
-                        == {"high", "medium", "low", "background"}
+                        len(throughputs) >= 2
                         and experiment_id not in fairness_recorded
                     ):
                         metrics.record_fairness(experiment_id, throughputs)
