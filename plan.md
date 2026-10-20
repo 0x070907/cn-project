@@ -239,22 +239,22 @@ The "Shared" row is deliberate — the rubric rewards integration and viva under
 **Owns throughout the whole project:** packet generation, logging, and turning raw logs into results. This role has the most continuous arc — you build the thing that produces data in D1 (Phases 1-2), and the thing that proves QoS worked in D2 (Phases 5-6).
 
 **D1 tasks (target: TCP/UDP Socket Implementation, 4 marks)**
-- [ ] `sender.py`: opens a UDP socket, builds packets (Section 1.4), sends at a configurable rate (Phase 1.2, 2.1-2.3)
-- [ ] `receiver.py`: opens a UDP socket, listens on one port, logs each packet (seq, send time, recv time, size) to CSV (Phase 1.1)
-- [ ] Command-line arguments for flow ID, destination, port, packet size, rate, duration
-- [ ] Basic error handling (e.g., graceful behavior if receiver isn't up yet)
-- [ ] Throughput, latency, and packet-loss calculations working on logged data (Phase 2.4-2.6)
+- [x] `sender.py`: opens a UDP socket, builds packets (Section 1.4), sends at a configurable rate (Phase 1.2, 2.1-2.3)
+- [x] `receiver.py`: opens a UDP socket, listens on one port, logs each packet (seq, send time, recv time, size) to CSV (Phase 1.1)
+- [x] Command-line arguments for flow ID, destination, port, packet size, rate, duration
+- [x] Basic error handling (e.g., graceful behavior if receiver isn't up yet)
+- [x] Throughput, latency, and packet-loss calculations working on logged data (Phase 2.4-2.6)
 
 **D1 shared contribution**
 - [ ] Run `sender.py`/`receiver.py` inside Mininet hosts with Person B, confirm logs fill correctly (Socket–SDN Integration)
 - [ ] Demo the sender → receiver flow live (Initial Testing & Demo)
 
 **D2 tasks (target: Complete Application Functionality, 4 marks + Performance Evaluation, 5 marks)**
-- [ ] Extend to all flows running simultaneously, each with its own size/rate profile
-- [ ] Receiver handles all flow ports at once (threads or separate processes)
+- [x] Extend to all flows running simultaneously, each with its own size/rate profile
+- [x] Receiver handles all flow ports at once (threads or separate processes)
 - [ ] Logging robust enough for a full multi-minute experiment without errors
 - [ ] `analyze.py`: per-flow throughput, average latency, packet loss, for each of the 5 experiment runs (Phase 6 table)
-- [ ] Compute Jain's Fairness Index per run (Phase 5)
+- [x] Compute Jain's Fairness Index per run (Phase 5)
 - [ ] Build comparison graphs (no-congestion vs. congestion-no-SDN vs. static priority vs. dynamic priority)
 
 **D2 shared contribution**
@@ -266,14 +266,14 @@ The "Shared" row is deliberate — the rubric rewards integration and viva under
 **Owns throughout the whole project:** the network itself — building it in D1 (Phase 3), then making the bottleneck meaningful with real QoS queues in D2 (Phase 4).
 
 **D1 tasks (target: half of Mininet + SDN Implementation)**
-- [ ] `topology.py`: hosts, switch(es), bottleneck link with bandwidth cap via `TCLink` (Phase 3.1-3.3)
-- [ ] `RemoteController` configured, pointing at the Ryu controller (keep a no-controller mode in `topology.py` for the first tests)
-- [ ] Verified with `pingall` — all hosts reachable
-- [ ] Controlled congestion set up: flow demand exceeding bottleneck capacity (Phase 3.4)
-- [ ] Baseline (no-SDN) measurements recorded and saved (Phase 3.5) — critical, do this before SDN work starts. Run it through C's forwarding-only controller with the same bandwidth and queue settings you will use later, 3 runs per scenario, and record which `run_id` is which scenario
+- [x] `topology.py`: hosts, switch(es), bottleneck link with bandwidth cap via `TCLink` (Phase 3.1-3.3)
+- [x] `RemoteController` configured, pointing at the Ryu controller (keep a no-controller mode in `topology.py` for the first tests)
+- [x] Verified with `pingall` — all hosts reachable
+- [x] Controlled congestion set up: flow demand exceeding bottleneck capacity (Phase 3.4)
+- [x] Baseline (no-SDN) measurements recorded and saved (Phase 3.5) — critical, do this before SDN work starts. Run it through C's forwarding-only controller with the same bandwidth and queue settings you will use later, 3 runs per scenario, and record which `run_id` is which scenario
 
 **D1 shared contribution**
-- [ ] Run `sender.py`/`receiver.py` inside Mininet hosts with Person A (Socket–SDN Integration)
+- [x] Run `sender.py`/`receiver.py` inside Mininet hosts with Person A (Socket–SDN Integration)
 - [ ] Help draw the architecture diagram — you know the topology best (Problem Understanding & Architecture)
 
 **D2 tasks (target: half of Dynamic SDN Functionality)**
@@ -407,7 +407,7 @@ h2 ──┼── s1 ═══ 5 Mbps ═══ s2 ── h4 (UDP receiver)
 h3 ──┘
 ```
 
-### Topology (`mininet/topology.py`)
+### Topology (`mininet/topology.py`) (done)
 
 - Create hosts h1, h2, h3, h4 (10.0.0.1 – 10.0.0.4) and switches s1, s2.
 - Connect h1, h2, h3 to s1, h4 to s2, and s1–s2 as the 5 Mbps bottleneck (port `s1-eth4`).
@@ -419,13 +419,13 @@ h3 ──┘
 - Verify the cap with iperf (send 20 Mbps over UDP, expect about 5 Mbps received).
 - Check early whether the `TCLink` cap and OVS queues can share the bottleneck port. If not, make the 5 Mbps cap with the OVS queue instead, and write the decision down.
 
-### Running the UDP Application
+### Running the UDP Application (done)
 
 - Start the receiver on h4 and the senders on h1, h2 and h3 (h3 runs both low and background).
 - Use `--ip 10.0.0.4` and the **same `--run-id`** for all four senders.
 - Set `--count` from the wanted duration: `count = rate × 1e6 × seconds / (size × 8)`.
 
-### Experiment Runner (`mininet/run_experiment.py`)
+### Experiment Runner (`mininet/run_experiment.py`) (done)
 
 
 - Run one scenario with one command: *no congestion* (flows 1 and 2) or *congestion* (all four).
