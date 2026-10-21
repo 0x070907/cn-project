@@ -1,9 +1,9 @@
 """Run one scenario inside Mininet using the real programs in app/. """
 
-# What one run does:
-#    1. build + start the network
-#    2. start the receiver on h4
-#    3. start the senders (shared run id)
+# What one run does, in order:
+#    1. build + start the network (topology.py)
+#    2. start receiver.py on h4
+#    3. start sender.py on h1/h2/h3, one per flow, all with the same run id
 #    4. wait for the senders to finish
 #    5. stop the receiver, stop the network
 #    6. save and print the results
@@ -20,21 +20,23 @@ import sys
 import time
 from typing import IO, TYPE_CHECKING
 
+# let Python find topology.py, which sits in the same folder as this file
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from mininet.log import setLogLevel      # noqa: E402
 from topology import build              # noqa: E402
 
 if TYPE_CHECKING:
-    from mininet.net import Mininet
+    from mininet.net import Mininet     # only needed for type hints
 
-# settings (where things are, and what each flow looks like)
+# settings: where things are, and what each flow looks like
+# __file__ = this script. dirname once = mininet/ folder, twice = repo root( cn-project/)
 REPO: str = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-APP: str = os.path.join(REPO, "app")
+APP: str = os.path.join(REPO, "app")                  # sender.py and receiver.py live here
 RESULTS: str = os.path.join(REPO, "results")          # same folder metrics.py writes to
 EXPERIMENTS: str = os.path.join(REPO, "experiments")  # results we choose to commit
 RECEIVER_IP: str = "10.0.0.4"
-GRACE_SECONDS: float = 2.0     # receiver waits 1 s after END; leave margin
+GRACE_SECONDS: float = 2.0     # receiver waits 1 s after END, so we wait 2 s to be safe
 
 
 # so we aren't taking any cla currently(need to fix)
@@ -49,37 +51,39 @@ FLOWS: dict[str, tuple[str, int, float]] = {
 
 SCENARIOS: dict[str, list[str]] = {
     # scenario name -> which flows run
-    "no_congestion": ["high", "medium"],                       # 3 Mbps  < 5 Mbps
-    "congestion":    ["high", "medium", "low", "background"],  # 10 Mbps > 5 Mbps
+    "no_congestion": ["high", "medium"],                       # 1+2 = 3 Mbps  < 5 Mbps link
+    "congestion":    ["high", "medium", "low", "background"],  # 1+2+3+4 = 10 Mbps > 5 Mbps link
 }
 
 
-# 2. the sender takes a packet count
+# 1. the sender takes a packet count
 def packet_count(size: int, rate_mbps: float, seconds: int) -> int:  #we r again not taking --count and using this formula instead
-     
+    # sender.py has --count (how many packets) but no --duration, so we convert
     # packets = (bits per second * seconds) / (bits per packet)
     return int(rate_mbps * 1_000_000 * seconds / (size * 8))
 
 
-# 3. start the receiver on h4
+# 2. start the receiver on h4
 def start_receiver(net: Mininet,
-                    out_dir: str, 
-                    logs: list[IO[str]]
-                  ) -> subprocess.Popen:
+                   out_dir: str,
+                   logs: list[IO[str]]
+                   ) -> subprocess.Popen:
 
-    log = open(os.path.join(out_dir, "receiver.log"), "w") # join() just combines everything with '/'
-    logs.append(log)
+    # everything the receiver prints goes to receiver.log in this run's folder
+    log = open(os.path.join(out_dir, "receiver.log"), "w") # join() concats all params with '/'
+    logs.append(log)         # remember it so we can close it at the end
 
-    # popen() starts a program inside h4 and returns immediately
+    # net.get("h4") = the fake computer h4. popen() starts a program inside it and does not wait.
+    # Same as typing "h4 python3 app/receiver.py &" in Mininet.
     return net.get("h4").popen(
-                                ["python3", os.path.join(APP, "receiver.py")],
-                                stdout=log, 
-                                stderr=subprocess.STDOUT,
-                                cwd=APP,
-                            )
+        ["python3", os.path.join(APP, "receiver.py")],
+        stdout=log,
+        stderr=subprocess.STDOUT,    # errors go to the same log file
+        cwd=APP,                  # run from app/ (the receiver writes to ../results)
+    )
 
 
-# 4. start one sender per flow,all with the  same run id
+# 3. start one sender per flow,all with the  same run id
 def start_senders(net: Mininet, 
                   scenario: str, # congestion or no_congestion
                   duration: int,
@@ -95,6 +99,8 @@ def start_senders(net: Mininet,
         log = open(os.path.join(out_dir, f"sender_{name}.log"), "w")
         logs.append(log)
 
+        # exactly the command a person would type after "h3 " at the mininet> prompt
+        # h3 python3 app/sender.py --ip 10.0.0.4 --flow high --size 200 --rate 1 --count 10 --run-i
         cmd = [
             "python3", os.path.join(APP, "sender.py"),
             "--ip", RECEIVER_IP,
@@ -102,33 +108,32 @@ def start_senders(net: Mininet,
             "--size", str(size),
             "--rate", str(rate),
             "--count", str(packet_count(size, rate, duration)),
-            "--run-id", str(run_id),   #the run_id is arbitary(need to fix)
+            "--run-id", str(run_id),        # same number for all senders of this run
         ]
         senders.append(net.get(host).popen(cmd,
-                                            stdout=log,
-                                            stderr=subprocess.STDOUT,
-                                            cwd=APP)
-                      )
-    return senders
+                                           stdout=log,
+                                           stderr=subprocess.STDOUT,
+                                           cwd=APP))
+    return senders     # all senders are now running at the same time
 
 
-# 5. wait for the senders, then stop the receiver cleanly
-def stop_receiver(receiver: subprocess.Popen) -> None:
+# 4. wait for the senders, then stop the receiver cleanly
+def stop_receiver(receiver: subprocess.Popen) -> None: # Ctrl+C the receiver (so it prints its summary)
 
-    receiver.send_signal(signal.SIGINT)    # same as pressing Ctrl+C in the receiver
+    receiver.send_signal(signal.SIGINT)     # same as pressing Ctrl+C in the receiver
 
     try:
-        receiver.wait(timeout=5)
+        receiver.wait(timeout=5)  #give it up to 5 s to exit
     except subprocess.TimeoutExpired:
-        receiver.terminate()        # results are already saved per run
+        receiver.terminate()     #results are already saved per run
 
 
-# 6. bookkeeping (manifest, printing, a summary file we can commit)
+# 5. bookkeeping (manifest, printing, a summary file we can commit)
 def write_manifest(run_id: int, scenario: str, mode: str, duration: int) -> None:
 
 # metrics.csv has no scenario column, so need to remember which run was which
 
-    os.makedirs(RESULTS, exist_ok=True)
+    os.makedirs(RESULTS, exist_ok=True)  # create results/ if missing, no error if present
     path = os.path.join(RESULTS, "manifest.csv")
     is_new = not os.path.exists(path)
     
