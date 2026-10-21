@@ -66,7 +66,8 @@ def packet_count(size: int, rate_mbps: float, seconds: int) -> int:  #we r again
 # 2. start the receiver on h4
 def start_receiver(net: Mininet,
                    out_dir: str,
-                   logs: list[IO[str]]
+                   logs: list[IO[str]],
+                   expected_flows: int
                    ) -> subprocess.Popen:
 
     # everything the receiver prints goes to receiver.log in this run's folder
@@ -76,7 +77,8 @@ def start_receiver(net: Mininet,
     # net.get("h4") = the fake computer h4. popen() starts a program inside it and does not wait.
     # Same as typing "h4 python3 app/receiver.py &" in Mininet.
     return net.get("h4").popen(
-        ["python3", os.path.join(APP, "receiver.py")],
+        ["python3", os.path.join(APP, "receiver.py"),
+         "--expected-flows", str(expected_flows)],
         stdout=log,
         stderr=subprocess.STDOUT,    # errors go to the same log file
         cwd=APP,                  # run from app/ (the receiver writes to ../results)
@@ -91,7 +93,7 @@ def start_senders(net: Mininet,
                   out_dir: str, 
                   logs: list[IO[str]]
                   ) -> list[subprocess.Popen]:
-    
+
     senders: list[subprocess.Popen] = []
 
     for name in SCENARIOS[scenario]:
@@ -100,7 +102,7 @@ def start_senders(net: Mininet,
         logs.append(log)
 
         # exactly the command a person would type after "h3 " at the mininet> prompt
-        # h3 python3 app/sender.py --ip 10.0.0.4 --flow high --size 200 --rate 1 --count 10 --run-i
+        # h3 python3 app/sender.py --ip 10.0.0.4 --flow high --size 200 --rate 1 --count 10 --run-id 7
         cmd = [
             "python3", os.path.join(APP, "sender.py"),
             "--ip", RECEIVER_IP,
@@ -171,8 +173,8 @@ def append_summary(label: str,
                     mode: str,
                     rows: list[dict[str, str]]
                    ) -> None:
-    
-    # experiments/<label>/summary.csv = metrics rows + scenario name"""
+
+    # experiments/<label>/summary.csv = metrics rows + scenario name
     if not rows:
         return
 
@@ -194,28 +196,27 @@ def append_summary(label: str,
 def run_once(scenario: str, 
              mode: str,
              duration: int, 
+             run_id: int,
              label: str
              ) -> None:
-
-    # note : this's how run_id is being generated,need to fix this
-    run_id = int(time.time())       # one id shared by every sender
+ 
     out_dir = os.path.join(RESULTS, f"{scenario}_{run_id}")    # logs of this run
     os.makedirs(out_dir, exist_ok=True)
     logs: list[IO[str]] = []
- 
+
     net = build(mode)   # build() comes from topology.py; creates but does not start
     net.start()         # now the fake hosts, switches and cables really exist
- 
+
     try:
-        receiver = start_receiver(net, out_dir, logs)
+        receiver = start_receiver(net, out_dir, logs, len(SCENARIOS[scenario]))
         time.sleep(1)            # let the receiver open its ports first
         senders = start_senders(net, scenario, duration, run_id, out_dir, logs)
- 
+
         for p in senders:
             p.wait()          # wait until every sender has finished
         time.sleep(GRACE_SECONDS) # let the receiver finish the last flow
         stop_receiver(receiver)
- 
+
     finally:  # runs even if something above crashed, so Mininet is never left running
         net.stop()
 
@@ -233,16 +234,20 @@ def run_once(scenario: str,
 def main() -> None:
 
     parser = argparse.ArgumentParser(description="run one scenario in Mininet")
- 
+
     parser.add_argument("scenario", choices=SCENARIOS)   # no_congestion or congestion
- 
+
     parser.add_argument("--mode",
                         choices=["none", "remote"],
                         default="none",
                         help="none = no controller, remote = Ryu controller")
-    
+
     parser.add_argument("--duration", type=int, default=30, help="seconds of traffic")
     parser.add_argument("--repeat", type=int, default=1, help="how many times to run it")
+    parser.add_argument("--run-id",
+                        type=int,
+                        default=None,
+                        help="id shared by all senders of a run ; with --repeat it goes up by 1 each run") # its actually taking the time as default when traced back
     parser.add_argument("--label",
                         default="baseline",   #later we will add choices as baseline,baseline_ryu,static,dynamic ; to match the plan.md
                         help="folder name: results are also saved in experiments/<label>/summary.csv")
@@ -258,11 +263,13 @@ def main() -> None:
 
     setLogLevel("warning")    # no printing "*** Adding hosts..." lines)
 
+    base_id = args.run_id if args.run_id is not None else int(time.time())
+
     for i in range(args.repeat):
         print(f"--- run {i + 1} of {args.repeat} ---")
-        run_once(args.scenario, args.mode, args.duration, args.label)
+        run_once(args.scenario, args.mode, args.duration, base_id + i, args.label)
         if i + 1 < args.repeat:
-            time.sleep(2)      # wait so the next run gets a different run id
+            time.sleep(2)      # short pause before the next run
 
 
 if __name__ == "__main__":
