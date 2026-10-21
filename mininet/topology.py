@@ -44,7 +44,7 @@ def build(mode: str = "none", cap: str = "tclink") -> Mininet:  # [--mode none|r
                           port=CONTROLLER_PORT
                           )
         
-        switch_args = {"protocols": "OpenFlow13"} # Ryu and Open vSwitch(OVS) talk through a lang called OpenFlow 1.3
+        switch_args = {"protocols": "OpenFlow13"} # Ryu and Open vSwitch(OVS) talk through a protocol called OpenFlow 1.3
 
 
     # the four fake computers, with fixed IP addresses
@@ -66,7 +66,7 @@ def build(mode: str = "none", cap: str = "tclink") -> Mininet:  # [--mode none|r
 
     if cap == "tclink": # A link only gets a limit if we pass bw to addLink,so the only slow part of the network is the s1-s2 cable
 
-        # bw=5 means at most 5 Mbps. max_queue_size=100 means at most 100 packets may wait in line(the per-link buffer thing) 
+        # bw=5 means at most 5 Mbps. max_queue_size=100 means at most 100 packets may wait in line(the queue in front of the cable)
         # when the line is full, new packets are dropped and measured as loss
         net.addLink(s1, s2, bw=BOTTLENECK_MBPS, max_queue_size=QUEUE_PACKETS)
     else:
@@ -76,9 +76,10 @@ def build(mode: str = "none", cap: str = "tclink") -> Mininet:  # [--mode none|r
     net.addLink(s2, h4)
     return net
 
-
+# this will never run unless you run it independently like sudo python3 mininet/topology.py
+# bcz we use  only the build() of this file in run_experiment.py
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser()   # [--mode none|remote] [--cap tclink|none]
     parser.add_argument("--mode", choices=["none", "remote"], default="none")
     parser.add_argument("--cap", choices=["tclink", "none"], default="tclink")
     args = parser.parse_args()
