@@ -39,7 +39,7 @@ Run everything from the repo root (`cd ~/cn-project`).
 
 ### Network only: `mininet/topology.py` 
 
-> just to see the proj topology,it is implicitly used by `mininet/.run_experiment.py`
+> just to see the proj topology,it is implicitly used by `mininet/run_experiment.py`
 
 
 ```bash
@@ -64,7 +64,9 @@ sudo python3 mininet/topology.py --mode remote
 ```bash
 sudo python3 mininet/run_experiment.py no_congestion --duration 30
 sudo python3 mininet/run_experiment.py congestion --duration 30
-sudo python3 mininet/run_experiment.py congestion --mode remote --repeat 3 --label static   # this also wil not work now ; only try the first two
+sudo python3 mininet/run_experiment.py congestion --duration 10 --run-id 4 --label test   # a short test run with its own run id
+sudo python3 mininet/run_experiment.py no_congestion --duration 10 --repeat 3 --run-id 5 --label test   # 3 runs, ids 5, 6, 7
+sudo python3 mininet/run_experiment.py congestion --mode remote --repeat 3 --label static   # this also will not work now ; only try the ones above
 ```
 
 | Option | Meaning | Default |
@@ -73,9 +75,13 @@ sudo python3 mininet/run_experiment.py congestion --mode remote --repeat 3 --lab
 | `--mode` | `none` = no controller, `remote` = Ryu | `none` |
 | `--duration` | seconds of traffic | 30 |
 | `--repeat` | number of runs | 1 |
+| `--run-id` | id shared by all senders of a run; with `--repeat` it goes up by 1 each run | current time |
 | `--label` | folder name under `experiments/` | `baseline` |
 
 > refer the `mininet/run_experiment.py` file for more info abt these cla's
+
+- Use a **new `--run-id` for every run**: all the results are grouped by it, so don't reuse.
+- Use `--label test` for practice runs so they don't end up in `experiments/baseline/`.
 
 The script builds the network, starts `receiver.py` on h4 and one `sender.py` per flow on h1, h2 and h3, then saves the results.
 
@@ -108,7 +114,7 @@ Start Ryu in one terminal, then run in a second terminal:
 ```bash
 ryu-manager controller/<your_controller>.py
 sudo python3 mininet/topology.py --mode remote       # then: pingall
-sudo python3 mininet/run_experiment.py congestion --mode remote --label <name>
+sudo python3 mininet/run_experiment.py congestion --mode remote --run-id <new id> --label <name>
 sudo ovs-ofctl -O OpenFlow13 dump-flows s1           # see the installed rules
 ```
 
