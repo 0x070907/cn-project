@@ -175,7 +175,7 @@ def append_summary(label: str,
     # experiments/<label>/summary.csv = metrics rows + scenario name"""
     if not rows:
         return
-    
+
     out_dir = os.path.join(EXPERIMENTS, label)
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, "summary.csv")
@@ -190,7 +190,7 @@ def append_summary(label: str,
             writer.writerow({"scenario": scenario, "mode": mode, **r})
 
 
-# 7. one complete run 
+# 6. one complete run 
 def run_once(scenario: str, 
              mode: str,
              duration: int, 
@@ -199,24 +199,24 @@ def run_once(scenario: str,
 
     # note : this's how run_id is being generated,need to fix this
     run_id = int(time.time())       # one id shared by every sender
-    out_dir = os.path.join(RESULTS, f"{scenario}_{run_id}")
+    out_dir = os.path.join(RESULTS, f"{scenario}_{run_id}")    # logs of this run
     os.makedirs(out_dir, exist_ok=True)
     logs: list[IO[str]] = []
-
-    net = build(mode)  # this builds the network, build is imported from topology.py
-    net.start()
-
+ 
+    net = build(mode)   # build() comes from topology.py; creates but does not start
+    net.start()         # now the fake hosts, switches and cables really exist
+ 
     try:
         receiver = start_receiver(net, out_dir, logs)
-        time.sleep(1)          # let the receiver open its 4 ports
+        time.sleep(1)            # let the receiver open its ports first
         senders = start_senders(net, scenario, duration, run_id, out_dir, logs)
-
-        for p in senders:     # wait until every sender is done
-            p.wait()
-        time.sleep(GRACE_SECONDS)    # let the receiver finish its last run
+ 
+        for p in senders:
+            p.wait()          # wait until every sender has finished
+        time.sleep(GRACE_SECONDS) # let the receiver finish the last flow
         stop_receiver(receiver)
-
-    finally:
+ 
+    finally:  # runs even if something above crashed, so Mininet is never left running
         net.stop()
 
         for log in logs:
@@ -229,13 +229,13 @@ def run_once(scenario: str,
     append_summary(label, scenario, mode, rows)
 
 
-# 8. the command line
+# 7. the command line
 def main() -> None:
 
     parser = argparse.ArgumentParser(description="run one scenario in Mininet")
-
-    parser.add_argument("scenario", choices=SCENARIOS)
-
+ 
+    parser.add_argument("scenario", choices=SCENARIOS)   # no_congestion or congestion
+ 
     parser.add_argument("--mode",
                         choices=["none", "remote"],
                         default="none",
@@ -244,25 +244,27 @@ def main() -> None:
     parser.add_argument("--duration", type=int, default=30, help="seconds of traffic")
     parser.add_argument("--repeat", type=int, default=1, help="how many times to run it")
     parser.add_argument("--label",
-                        default="baseline",
-                        help="results are also saved in experiments/<label>/summary.csv")
-    
+                        default="baseline",   #later we will add choices as baseline,baseline_ryu,static,dynamic ; to match the plan.md
+                        help="folder name: results are also saved in experiments/<label>/summary.csv")
+
     args = parser.parse_args()
 
-    if os.geteuid() != 0:
+    # Mininet creates network devices, which only root may do
+    if os.geteuid() != 0:     # geteuid() == 0 means "I am root",that is cn-project/
         sys.exit("Mininet needs root: run it with  sudo python3 mininet/run_experiment.py ...")
 
-    if shutil.which("python3") is None:
+    if shutil.which("python3") is None:  # checks if python3 on this machine's path
         sys.exit("python3 not found")
 
-    setLogLevel("warning")    # keep Mininet quiet,else it prints those links,hosts info and all
+    setLogLevel("warning")    # no printing "*** Adding hosts..." lines)
 
     for i in range(args.repeat):
         print(f"--- run {i + 1} of {args.repeat} ---")
         run_once(args.scenario, args.mode, args.duration, args.label)
         if i + 1 < args.repeat:
-            time.sleep(2)            # also keeps run ids unique
+            time.sleep(2)      # wait so the next run gets a different run id
 
 
 if __name__ == "__main__":
     main()
+ 
