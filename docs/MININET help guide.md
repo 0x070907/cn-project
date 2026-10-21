@@ -43,12 +43,20 @@ Run everything from the repo root (`cd ~/cn-project`).
 
 
 ```bash
-sudo python3 mininet/topology.py                 # no controller
-sudo python3 mininet/topology.py --mode remote   # with Ryu (start Ryu first)
+# no controller
+sudo python3 mininet/topology.py     
+#at the mininet> prompt (which's like mininet>pingall)
+pingall    #expect 0% dropped
+links
+exit     #close and cleanup
+```
+```bash
+ # with Ryu (start Ryu first)  
+sudo python3 mininet/topology.py --mode remote  
 # dont try this now,we need from phase 4
+#even if u try,when u pingall at the mininet> prompt,it will be 100% dropped
 ```
 
-This opens a `mininet>` prompt (`pingall`, `links`, `exit`).
  Options: `--mode none|remote` and `--cap tclink|none` (`tclink` = the cable is limited to 5 Mbps, `none` = unlimited cable for OVS-queue limiting).
 
 ### One scenario: `mininet/run_experiment.py`
