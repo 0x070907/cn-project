@@ -192,6 +192,15 @@ h1 ─────────────── OVS ─────────
 - **Phase 4.2 — Apply priority:** rerun the exact same congestion experiment from Step 3.5, now with SDN priority active. Compare throughput/latency/loss, no-SDN vs. with-priority, per flow.
 - **Phase 4.3 — Dynamic policy changes:** make the controller change priorities *while the experiment is running* — e.g., Flow 1 normal for the first 30 seconds, then promoted to HIGH for the next 30, while Flow 2 becomes HIGH in a later window. This is what proves "dynamic," not just a fixed setup.
 
+**Phase 4 checkpoint - confirm before moving on:**
+
+- [ ] **Phase 4.1 - Controller Setup:** Run Ryu with Mininet/OVS and verify the OpenFlow connection and basic connectivity.
+- [ ] **Phase 4.2 - Flow Classification:** Identify the existing UDP flows by destination port and assign HIGH, MEDIUM, and LOW priorities.
+- [ ] **Phase 4.3 - Apply QoS:** Configure OVS queues and controller rules to enforce priorities during congestion.
+- [ ] **Phase 4.4 - Compare Results:** Run the same experiment with and without QoS; compare per-flow throughput, latency, and packet loss.
+- [ ] **Phase 4.5 - Dynamic Priorities:** Change a flow's priority while traffic is running and measure the impact.
+
+
 ### PHASE 5 — Fairness Analysis
 
 **Goal:** investigate the trade-off — if you prioritize one class, what happens to the others?
