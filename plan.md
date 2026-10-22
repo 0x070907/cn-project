@@ -194,11 +194,14 @@ h1 ─────────────── OVS ─────────
 
 **Phase 4 checkpoint - confirm before moving on:**
 
-- [ ] **Phase 4.1 - Controller Setup:** Run Ryu with Mininet/OVS and verify the OpenFlow connection and basic connectivity.
-- [ ] **Phase 4.2 - Flow Classification:** Identify the existing UDP flows by destination port and assign HIGH, MEDIUM, and LOW priorities.
-- [ ] **Phase 4.3 - Apply QoS:** Configure OVS queues and controller rules to enforce priorities during congestion.
-- [ ] **Phase 4.4 - Compare Results:** Run the same experiment with and without QoS; compare per-flow throughput, latency, and packet loss.
-- [ ] **Phase 4.5 - Dynamic Priorities:** Change a flow's priority while traffic is running and measure the impact.
+- [ ] **Controller Setup:** Ryu connects to OVS and basic forwarding works.
+- [ ] **Flow Classification:** All UDP flows are identified correctly.
+- [ ] **Priority Mapping:** HIGH, MEDIUM, and LOW priorities are assigned.
+- [ ] **QoS Configuration:** OVS queues enforce priorities under congestion.
+- [ ] **Baseline Comparison:** No-SDN and SDN-priority results are recorded.
+- [ ] **Performance Analysis:** Throughput, latency, and packet loss are compared per flow.
+- [ ] **Dynamic Policies:** Flow priorities change while traffic is running.
+- [ ] **Final Validation:** Results are repeatable and observations documented.
 
 
 ### PHASE 5 — Fairness Analysis
