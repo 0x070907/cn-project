@@ -34,13 +34,20 @@ class RunState(TypedDict):
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print per-packet and per-flow event details",
+    )
+    parser.add_argument(
         "--expected-flows",
         type=int,
         choices=range(1, len(protocol.flow_ids) + 1),
         default=len(protocol.flow_ids),
         help="Number of flows expected in each experiment",
     )
-    expected_flows = parser.parse_args().expected_flows
+    args=parser.parse_args()  # we parse the arguments nly once but keep our existing --expected-flows arg
+    verbose=args.verbose
+    expected_flows = args.expected_flows
     ports: dict[int, int] = protocol.flow_ports
     sockets: dict[socket.socket, int] = {}                    #socket object -> flow_id,the port a packet arrives on tells us its flow
     runs: dict[tuple[int, int], RunState] = {}                #(run_id, flow_id) -> scoreboard of runs still in progress
@@ -65,7 +72,9 @@ def main() -> None:
         for flow_id, port in ports.items():
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # lets us restart the receiver quickly
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
             sock.bind(("0.0.0.0", port))           # 0.0.0.0 = listen on every interface (needed so h4 in mininet can hear h1/h2/h3)
+            print(f"port {port}: receive buffer = {sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)} bytes")
             sockets[sock] = flow_id
             print(f"listening for {flow_names[flow_id]} traffic on port {port}")
 
@@ -80,6 +89,8 @@ def main() -> None:
 
             for sock in readable: #readable : list[socket]
                 packet, address = sock.recvfrom(65535)
+                recv_ts_ns = time.monotonic_ns()
+                now = time.monotonic()
                 flow_id : int = sockets[sock]  # which flow this is, decided by the port the packet arrived on
 
                 # we check whether this is a start/end control message or a data packet,but how??
@@ -113,10 +124,11 @@ def main() -> None:
                                 "duplicates": 0,
                                 "out_of_order": 0,
                             }
-                            print(
-                                f"{flow_names[flow_id]} run {run_id} started; "
-                                f"expecting {count} packets"
-                            )
+                            if verbose:
+                                print(
+                                    f"{flow_names[flow_id]} run {run_id} started; "
+                                    f"expecting {count} packets"
+                                )
 
                         #a repeated START (sender never got our ACK) with a different count doesn't match this run, so ignore it
                         #a repeated START with the same count just falls through and gets acknowledged again
@@ -152,11 +164,11 @@ def main() -> None:
                             ),
                             address,
                         )
-
-                        print(
-                            f"{flow_names[flow_id]} run {run_id} ended; "
-                            f"waiting for late packets"
-                        )
+                        if verbose:
+                            print(
+                                f"{flow_names[flow_id]} run {run_id} ended; "
+                                f"waiting for late packets"
+                            )
 
                     continue   # control messages carry no traffic, so skip the data-packet code below and wait for the next datagram
 
@@ -185,7 +197,8 @@ def main() -> None:
                 if sequence_number in run["sequences"]:
                     duplicates[flow_id] += 1
                     run["duplicates"] += 1
-                    print(f"{flow_names[flow_id]}: duplicate packet {sequence_number}")
+                    if verbose:
+                        print(f"{flow_names[flow_id]}: duplicate packet {sequence_number}")
                     continue
 
                 # a sequence number smaller than the previous highest means reordering
@@ -204,15 +217,15 @@ def main() -> None:
                 )
 
                 run["payload_bytes"] += len(payload)
-                run["latencies_ns"].append(time.monotonic_ns() - timestamp)  # latency = arrival time - the sender's timestamp inside the packet
+                run["latencies_ns"].append(recv_ts_ns - timestamp)  # this records the timestamp before packet parsing & other receiver processing
                 # (valid because sender and receiver share one clock, which holds on localhost and inside mininet)
 
                 last_sequence[flow_id] = max(last_sequence[flow_id], sequence_number)
-
-                print(
-                    f"received {flow_names[flow_id]} packet {sequence_number} "
-                    f"from {address[0]}:{address[1]}"
-                )
+                if verbose:
+                    print(
+                        f"received {flow_names[flow_id]} packet {sequence_number} "
+                        f"from {address[0]}:{address[1]}"
+                    )
 
             # this runs on EVERY loop pass, even when nothing arrived (that is why select has a 0.2s timeout)
             # we then give delayed UDP packets time to arrive before calculating packet loss
