@@ -72,9 +72,9 @@ def main() -> None:
         for flow_id, port in ports.items():
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # lets us restart the receiver quickly
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024) # we make the buffer bigger cuz every udp socket has a recv buffer in the kernel, if buffer=full then packets are dropped
             sock.bind(("0.0.0.0", port))           # 0.0.0.0 = listen on every interface (needed so h4 in mininet can hear h1/h2/h3)
-            print(f"port {port}: receive buffer = {sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)} bytes")
+            print(f"port {port}: receive buffer = {sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)} bytes") # diagnostic: as linux sometimes caps recv buffersize
             sockets[sock] = flow_id
             print(f"listening for {flow_names[flow_id]} traffic on port {port}")
 

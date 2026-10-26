@@ -26,6 +26,11 @@ class Args(argparse.Namespace):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="udp sender")
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print message for each packet sent (useful for debugging) ",
+    )
     parser.add_argument("--ip", default="127.0.0.1")
     parser.add_argument("--run-id", type=int, default=None)
     parser.add_argument("--port", type=int)  #tho there's no default value,it fallbacks to 5001 itself
@@ -128,7 +133,8 @@ def main() -> None:
             )
 
             sock.sendto(packet, server)
-            print(f"sent {args.flow} packet {i}")
+            if args.verbose: # avoid per-packet terminal output during normal experiments
+                print(f"sent {args.flow} packet {i}")
 
             # schedule packets at the requested approximate rate
             # rate is used to calculate interval,which is helping in the pace control
