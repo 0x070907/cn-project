@@ -203,6 +203,7 @@ def run_once(scenario: str,
     out_dir = os.path.join(RESULTS, f"{scenario}_{run_id}")    # logs of this run
     os.makedirs(out_dir, exist_ok=True)
     logs: list[IO[str]] = []
+    failed: list[str] = []
 
     net = build(mode)   # build() comes from topology.py; creates but does not start
     net.start()         # now the fake hosts, switches and cables really exist
@@ -214,6 +215,9 @@ def run_once(scenario: str,
 
         for p in senders:
             p.wait()          # wait until every sender has finished
+
+        failed = [name for name, p in zip(SCENARIOS[scenario], senders) if p.returncode != 0]
+
         time.sleep(GRACE_SECONDS) # let the receiver finish the last flow
         stop_receiver(receiver)
 
@@ -222,6 +226,9 @@ def run_once(scenario: str,
 
         for log in logs:
             log.close()
+
+    if failed:    # a sender that exits with an error leaves its flow without a metrics row
+        print(f"warning: sender(s) {failed} failed, see sender_<flow>.log in {out_dir}")
 
     write_manifest(run_id, scenario, mode, duration)
     rows = rows_for_run(run_id)
@@ -253,6 +260,13 @@ def main() -> None:
                         help="folder name: results are also saved in experiments/<label>/summary.csv")
 
     args = parser.parse_args()
+
+    if args.duration < 1:
+        parser.error("--duration must be at least 1 second")
+    if args.repeat < 1:
+        parser.error("--repeat must be at least 1")
+    if args.run_id is not None and args.run_id < 0:
+        parser.error("--run-id must be 0 or more")
 
     # Mininet creates network devices, which only root may do
     if os.geteuid() != 0:     # geteuid() == 0 means "I am root",that is cn-project/
