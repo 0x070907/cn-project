@@ -101,15 +101,20 @@ The script builds the network, starts `receiver.py` on h4 and one `sender.py` pe
 
 ### 3.1 One-time Ryu setup
 
-Ryu is an old project (last release 4.34), so it needs **Python 3.9** and a pinned `eventlet`. Use a separate venv so it doesn't touch the rest of your Python:
+Ryu is an old project (last release 4.34), so it needs **Python 3.9** and a pinned `eventlet`. Use a separate venv so it doesn't touch the rest of your Python(here,its `uvenv`):
 
 ```bash
+python3 -m venv ~/uvenv  
+source ~/uvenv/bin/activate
+
 pip install uv                 ]
 uv venv --python 3.9 ~/ryuenv
 source ~/ryuenv/bin/activate
 uv pip install "setuptools==57.5.0" wheel pbr pip
 PBR_VERSION=4.34 python -m pip install --no-build-isolation "ryu==4.34" "eventlet==0.30.2"
 ryu-manager --version           # expect 4.34
+
+deactivate
 ```
 
 - Ryu runs inside `~/ryuenv`. Mininet runs outside it (system Python, with `sudo`).

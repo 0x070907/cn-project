@@ -477,7 +477,7 @@ h3 ──┘
 
 ### Completion Checklist
 
-- [x] `pingall` works (no-controller mode done; with Ryu pending)
+- [x] `pingall` works (no-controller mode  and with Ryu)
 - [x] iperf confirms about 5 Mbps (20 Mbps offered, about 4.9 Mbit/s received, `TCLink` cap)
 - [x] Receiver on h4 receives from h1, h2 and h3
 - [x] Demand (10 Mbps) > capacity (5 Mbps), all flows lose packets
