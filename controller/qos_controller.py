@@ -6,6 +6,12 @@ from ryu.ofproto import ofproto_v1_3
 from ryu.lib.packet import packet
 from ryu.lib.packet import ethernet, ipv4, udp, ether_types
 
+# Queues exist only on s1's port towards s2 (s1-eth4 = OpenFlow port 4).
+# s2 and the other ports have no queues, so the queue rule must not be used there.
+BOTTLENECK_DPID = 1
+BOTTLENECK_PORT = 4
+
+
 class QosController(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
 
@@ -18,6 +24,7 @@ class QosController(app_manager.RyuApp):
         datapath = ev.msg.datapath
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
+        self.logger.info('switch connected: dpid=%s', datapath.id)
         match = parser.OFPMatch()
         actions = [parser.OFPActionOutput(ofproto.OFPP_CONTROLLER,
                                          ofproto.OFPCML_NO_BUFFER)]
@@ -28,6 +35,8 @@ class QosController(app_manager.RyuApp):
         parser = datapath.ofproto_parser
         inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS,
                                              actions)]
+        self.logger.info('dpid=%s install flow priority=%s match=%s',
+                         datapath.id, priority, match)
         mod = parser.OFPFlowMod(datapath=datapath, priority=priority,
                                 match=match, instructions=inst)
         datapath.send_msg(mod)
@@ -67,9 +76,11 @@ class QosController(app_manager.RyuApp):
             elif dst_port == 5003: queue_id = 3
             elif dst_port == 5004: queue_id = 4
 
-            if queue_id is not None and out_port != ofproto.OFPP_FLOOD:
+            if (queue_id is not None and out_port != ofproto.OFPP_FLOOD
+                    and datapath.id == BOTTLENECK_DPID
+                    and out_port == BOTTLENECK_PORT):
                 actions = [
-                    parser.OFPActionEnqueue(out_port, queue_id),
+                    parser.OFPActionSetQueue(queue_id),  
                     parser.OFPActionOutput(out_port)
                 ]
                 match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_IP,
@@ -78,6 +89,13 @@ class QosController(app_manager.RyuApp):
 
         if not actions:
             actions = [parser.OFPActionOutput(out_port)]
+            if out_port != ofproto.OFPP_FLOOD:
+                # normal forwarding rule, so later packets skip the controller
+                #without it, UDP on s2 and all non-queue traffic would reach the controller one packet at a time.
+                match = parser.OFPMatch(in_port=in_port, 
+                                        eth_dst=dst,    
+                                        eth_src=src)
+                self.add_flow(datapath, 1, match, actions)
 
         data = msg.data if msg.buffer_id == ofproto.OFP_NO_BUFFER else None
         out = parser.OFPPacketOut(datapath=datapath, buffer_id=msg.buffer_id,
