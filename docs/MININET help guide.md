@@ -51,10 +51,9 @@ links
 exit     #close and cleanup
 ```
 ```bash
- # with Ryu (start Ryu first)  
-sudo python3 mininet/topology.py --mode remote  
-# dont try this now,we need from phase 4
-#even if u try,when u pingall at the mininet> prompt,it will be 100% dropped
+# with Ryu (start Ryu first, see section 3)
+sudo python3 mininet/topology.py --mode remote
+# pingall at the mininet> prompt is 0% dropped only while Ryu is running
 ```
 
  Options: `--mode none|remote` and `--cap tclink|none` (`tclink` = the cable is limited to 5 Mbps, `none` = unlimited cable for OVS-queue limiting).
@@ -66,7 +65,7 @@ sudo python3 mininet/run_experiment.py no_congestion --duration 30
 sudo python3 mininet/run_experiment.py congestion --duration 30
 sudo python3 mininet/run_experiment.py congestion --duration 10 --run-id 4 --label test   # a short test run with its own run id
 sudo python3 mininet/run_experiment.py no_congestion --duration 10 --repeat 3 --run-id 5 --label test   # 3 runs, ids 5, 6, 7
-sudo python3 mininet/run_experiment.py congestion --mode remote --repeat 3 --label static   # this also will not work now ; only try the ones above
+sudo python3 mininet/run_experiment.py congestion --mode remote --repeat 3 --label baseline_ryu   # needs Ryu running
 ```
 
 | Option | Meaning | Default |
@@ -98,27 +97,63 @@ The script builds the network, starts `receiver.py` on h4 and one `sender.py` pe
 
 ---
 
-## 3. Using it with a controller (Next phase - doesn't work now)
+## 3. Using it with Ryu (3 terminals)
 
-| Fact | Value |
-|---|---|
-| Controller address | `127.0.0.1:6653`, OpenFlow 1.3 |
-| Switches | `s1` (hosts + bottleneck), `s2` (receiver side) |
-| `s1` ports | 1 = h1, 2 = h2, 3 = h3, 4 = bottleneck to s2 (`s1-eth4`) |
-| `s2` ports | 1 = s1, 2 = h4 |
-| Hosts | h1 = 10.0.0.1, h2 = .2, h3 = .3, receiver h4 = 10.0.0.4 |
-| Flows by UDP port | 5001 high, 5002 medium, 5003 low, 5004 background |
+### 3.1 One-time Ryu setup
 
-Start Ryu in one terminal, then run in a second terminal:
+Ryu is an old project (last release 4.34), so it needs **Python 3.9** and a pinned `eventlet`. Use a separate venv so it doesn't touch the rest of your Python:
 
 ```bash
-ryu-manager controller/<your_controller>.py
-sudo python3 mininet/topology.py --mode remote       # then: pingall
-sudo python3 mininet/run_experiment.py congestion --mode remote --run-id <new id> --label <name>
-sudo ovs-ofctl -O OpenFlow13 dump-flows s1           # see the installed rules
+pip install uv                 ]
+uv venv --python 3.9 ~/ryuenv
+source ~/ryuenv/bin/activate
+uv pip install "setuptools==57.5.0" wheel pbr pip
+PBR_VERSION=4.34 python -m pip install --no-build-isolation "ryu==4.34" "eventlet==0.30.2"
+ryu-manager --version           # expect 4.34
 ```
 
-If Ryu is not running, nothing is forwarded in `remote` mode.
+- Ryu runs inside `~/ryuenv`. Mininet runs outside it (system Python, with `sudo`).
+
+### 3.2 The 3 terminals
+
+Open three terminals, all in `~/cn-project`. **Start order: Ryu first, then Mininet.**
+
+**Terminal 1: controller**
+
+```bash
+source ~/ryuenv/bin/activate
+cd ~/cn-project
+ryu-manager controller/baseline_controller.py      # or controller/qos_controller.py
+```
+
+Expect `switch connected: dpid=1` and `dpid=2` once Mininet starts. Leave it running; it also prints a line for every QoS rule it installs.
+
+**Terminal 2: the network** 
+
+```bash
+
+sudo python3 mininet/run_experiment.py congestion --mode remote --repeat 3 --label baseline_ryu
+```
+
+**Terminal 3: look inside** (works while terminal 2 is running)
+
+```bash
+sudo ovs-ofctl -O OpenFlow13 dump-flows s1     # rules + packet counters
+sudo ovs-ofctl -O OpenFlow13 dump-flows s2
+sudo ovs-vsctl show                            # switches + controller connection
+tc -s qdisc show dev s1-eth4                   # queue + drops on the bottleneck port
+tc -s class show dev s1-eth4                   # per-queue counters (only with OVS queues)
+```
+
+### 3.3 Between runs
+
+```bash
+# terminal 2: after exit / Ctrl+C
+sudo mn -c
+# terminal 1: Ctrl+C, then start the other controller if you are switching
+```
+
+Always restart Ryu when you switch controllers, so the old one's learned table is gone.
 
 ---
 
