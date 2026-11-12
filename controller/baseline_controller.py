@@ -19,6 +19,7 @@ class BaselineSwitch(app_manager.RyuApp):
         datapath = ev.msg.datapath
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
+        self.logger.info('switch connected: dpid=%s', datapath.id)
 
         match = parser.OFPMatch()
         actions = [parser.OFPActionOutput(ofproto.OFPP_CONTROLLER,
@@ -30,6 +31,8 @@ class BaselineSwitch(app_manager.RyuApp):
         parser = datapath.ofproto_parser
         inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS,
                                              actions)]
+        self.logger.info('dpid=%s install flow priority=%s match=%s',
+                         datapath.id, priority, match)
         if buffer_id is not None:
             mod = parser.OFPFlowMod(datapath=datapath, buffer_id=buffer_id,
                                     priority=priority, match=match,
