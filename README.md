@@ -55,24 +55,24 @@ The system demonstrates:
 ┌───────────────────────────────────────────────────────────────────────┐
 │                         MININET NETWORK                               │
 │                                                                       │
-│     ┌──────┐                                                         │
-│     │  h1  │────── HIGH ──────┐                                     │
-│     └──────┘                   │                                     │
-│                                │      ┌──────────┐                   │
-│     ┌──────┐                   ├─────►│    s1    │                   │
-│     │  h2  │────── MEDIUM ─────┤      │   OVS    │                   │
-│     └──────┘                   │      └────┬─────┘                   │
+│     ┌──────┐                                                          │
+│     │  h1  │────── HIGH ───────┐                                      │
+│     └──────┘                   │                                      │
+│                                │      ┌──────────┐                    │
+│     ┌──────┐                   ├─────►│    s1    │                    │
+│     │  h2  │────── MEDIUM ─────┤      │   OVS    │                    │
+│     └──────┘                   │      └────┬─────┘                    │
 │                                │           │                          │
-│     ┌──────┐                   │        BOTTLENECK                   │
-│     │  h3  │────── LOW ───────┘        LINK                          │
-│     └──────┘                              │                           │
+│     ┌──────┐                   │        BOTTLENECK                    │
+│     │  h3  │────── LOW ────────┘        LINK                          │
+│     └──────┘     + BACKGROUND             │                           │
 │                                           │                           │
 │                                      ┌────▼─────┐                     │
-│                                      │    s2     │                    │
-│                                      │   OVS     │                    │
-│                                      └────┬──────┘                    │
+│                                      │    s2    │                     │
+│                                      │   OVS    │                     │
+│                                      └────┬─────┘                     │
 │                                           │                           │
-│                                      ┌────▼─────┐                     │
+│                                      ┌────▼──────┐                    │
 │                                      │    h4     │                    │
 │                                      │ UDP Server│                    │
 │                                      └───────────┘                    │
@@ -129,7 +129,7 @@ For example, the traffic generators could collectively produce more
 traffic than the bottleneck can carry:
 
 ```text
-Traffic demand  = 9 Mbps
+Traffic demand  = 10 Mbps
 Bottleneck      = 5 Mbps
 ```
 
@@ -390,6 +390,10 @@ the combined traffic demand exceed the available bottleneck bandwidth.
 
 A baseline experiment is performed without dynamic QoS.
 
+The topology is in `mininet/topology.py` and one command per scenario is in
+`mininet/run_experiment.py`. Install and run instructions are in
+`docs/MININET_SETUP.md`.
+
 ### Phase 5 — SDN Controller and QoS
 
 Connect the Mininet network to the Ryu controller.
@@ -451,16 +455,16 @@ The receiver should:
 
 ### Completion Checklist
 
-- [ ] UDP sender works.
-- [ ] UDP receiver works.
-- [ ] Sender and receiver communicate successfully.
-- [ ] Sequence numbers are included in packets.
-- [ ] Timestamps are included in packets.
-- [ ] Different UDP ports can represent different flows.
-- [ ] Packet loss can be calculated.
-- [ ] Basic latency can be calculated.
-- [ ] Basic throughput can be calculated.
-- [ ] Multiple simultaneous flows are supported.
+- [x] UDP sender works.
+- [x] UDP receiver works.
+- [x] Sender and receiver communicate successfully.
+- [x] Sequence numbers are included in packets.
+- [x] Timestamps are included in packets.
+- [x] Different UDP ports can represent different flows.
+- [x] Packet loss can be calculated.
+- [x] Basic latency can be calculated.
+- [x] Basic throughput can be calculated.
+- [x] Multiple simultaneous flows are supported.
 
 ---
 
@@ -525,21 +529,29 @@ Merge into main
 cn-project/
 │
 ├── app/
+│   ├── protocol.py
 │   ├── sender.py
-│   └── receiver.py
+│   ├── receiver.py
+│   └── metrics.py
 │
 ├── controller/
+│   ├── baseline_controller.py
+│   └── qos_controller.py
 │
 ├── mininet/
+│   ├── topology.py
+│   └── run_experiment.py
 │
 ├── analysis/
 │
-├── experiments/
+├── experiments/        # saved results per label (baseline, static, dynamic)
 │
 ├── docs/
+│   └── MININET_SETUP.md
 │
+├── plan.md
 ├── README.md
-└── .gitignore
+└── .gitignore          # results/ (raw run logs) is not committed
 ```
 
 ---
@@ -590,7 +602,7 @@ Open vSwitch, and Ryu controller.
      │                           │     BOTTLENECK                │
      │    ┌──────┐               │          │                    │
      │    │  h3  │──── LOW ──────┘      ┌───▼────┐               │
-     │    └──────┘                      │   s2   │               │
+     │    └──────┘  + BACKGROUND        │   s2   │               │
      │                                  │  OVS   │               │
      │                                  └───┬────┘               │
      │                                      │                    │

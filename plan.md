@@ -95,6 +95,18 @@ Types: START, END, START_ACK, END_ACK. START and END carry the number of data pa
 | Flow 3 | 5003 | Low (file-transfer-like) | 1000 B | 3 Mbps |
 | Flow 4 | 5004 | Background | 1400 B | 4 Mbps |
 
+**OVS queue IDs** on the bottleneck port `s1-eth4` (OpenFlow port 4 on `s1`), used by the controller's `SetQueue()` rules:
+
+| Flow | UDP Port | Class | Queue ID | min-rate (placeholder) | max-rate |
+|---|---:|---|---:|---:|---:|
+| Flow 1 | 5001 | High | 1 | 2 Mbps | 5 Mbps |
+| Flow 2 | 5002 | Medium | 2 | 1.5 Mbps | 5 Mbps |
+| Flow 3 | 5003 | Low | 3 | 1 Mbps | 5 Mbps |
+| Flow 4 | 5004 | Background | 4 | 0.5 Mbps | 5 Mbps |
+
+The min-rates are starting values (they add up to the 5 Mbps link) and will be tuned after the baseline. Packets that match no rule go to the default queue 0.
+
+
 At the UDP layer, "priority" is only a **label** at this stage — just a name you've assigned. It becomes real priority only once the SDN controller (Phase 4 below) reads these port numbers and treats the flows differently. These are **synthetic** traffic classes — they don't need to be real voice/video/file applications, just packets shaped similarly to them.
 
 ---
@@ -188,7 +200,7 @@ h1 ─────────────── OVS ─────────
 - **Open vSwitch (OVS)** = a software-based switch (no physical hardware needed); Mininet uses this by default.
 - **Ryu** = a Python framework for writing the controller. You write rules like *"if UDP destination port == 5001, treat Flow 1 as high priority,"* and Ryu communicates that to OVS over OpenFlow.
 
-- **Phase 4.1 — Classify flows with SDN:** the controller reads the port numbers your flows already have (5001→high, 5002→medium, 5003/5004→low) and recognizes each flow.
+- **Phase 4.1 — Classify flows with SDN:** the controller reads the port numbers your flows already have (5001→queue 1 high, 5002→queue 2 medium, 5003→queue 3 low, 5004→queue 4 background; see the queue table in 1.5) and recognizes each flow.
 - **Phase 4.2 — Apply priority:** rerun the exact same congestion experiment from Step 3.5, now with SDN priority active. Compare throughput/latency/loss, no-SDN vs. with-priority, per flow.
 - **Phase 4.3 — Dynamic policy changes:** make the controller change priorities *while the experiment is running* — e.g., Flow 1 normal for the first 30 seconds, then promoted to HIGH for the next 30, while Flow 2 becomes HIGH in a later window. This is what proves "dynamic," not just a fixed setup.
 
@@ -258,8 +270,8 @@ The "Shared" row is deliberate — the rubric rewards integration and viva under
 - [x] Throughput, latency, and packet-loss calculations working on logged data (Phase 2.4-2.6)
 
 **D1 shared contribution**
-- [ ] Run `sender.py`/`receiver.py` inside Mininet hosts with Person B, confirm logs fill correctly (Socket–SDN Integration)
-- [ ] Demo the sender → receiver flow live (Initial Testing & Demo)
+- [x] Run `sender.py`/`receiver.py` inside Mininet hosts with Person B, confirm logs fill correctly (Socket–SDN Integration)
+- [x] Demo the sender → receiver flow live (Initial Testing & Demo)
 
 **D2 tasks (target: Complete Application Functionality, 4 marks + Performance Evaluation, 5 marks)**
 - [x] Extend to all flows running simultaneously, each with its own size/rate profile
@@ -282,11 +294,11 @@ The "Shared" row is deliberate — the rubric rewards integration and viva under
 - [x] `RemoteController` configured, pointing at the Ryu controller (keep a no-controller mode in `topology.py` for the first tests)
 - [x] Verified with `pingall` — all hosts reachable
 - [x] Controlled congestion set up: flow demand exceeding bottleneck capacity (Phase 3.4)
-- [x] Baseline (no-SDN) measurements recorded and saved (Phase 3.5) — critical, do this before SDN work starts. Run it through C's forwarding-only controller with the same bandwidth and queue settings you will use later, 3 runs per scenario, and record which `run_id` is which scenario
+- [x] Baseline (no-SDN) measurements recorded and saved (Phase 3.5) — critical, do this before SDN work starts. Run it through C's forwarding-only controller with the same bandwidth and queue settings you will use later, 3 runs per scenario, and record which `run_id` is which scenario. 
 
 **D1 shared contribution**
 - [x] Run `sender.py`/`receiver.py` inside Mininet hosts with Person A (Socket–SDN Integration)
-- [ ] Help draw the architecture diagram — you know the topology best (Problem Understanding & Architecture)
+- [x] Help draw the architecture diagram — you know the topology best (Problem Understanding & Architecture)
 
 **D2 tasks (target: half of Dynamic SDN Functionality)**
 - [ ] Create OVS queues on the bottleneck port (`ovs-vsctl`): one queue per flow, each with min/max rate
@@ -302,16 +314,16 @@ The "Shared" row is deliberate — the rubric rewards integration and viva under
 **Owns throughout the whole project:** the "brain" — a plain forwarding switch in D1, growing into real classification and live policy changes in D2 (Phase 4). This role carries the single highest-weighted D2 item (Dynamic SDN Functionality, 6 marks).
 
 **D1 tasks (target: half of Mininet + SDN Implementation)**
-- [ ] `baseline_controller.py`: a working Ryu learning-switch (forwarding only, no QoS yet)
-- [ ] Confirm it correctly installs forwarding rules and supports `pingall`
-- [ ] Learn the SDN/OVS/Ryu relationship well enough to explain it (see Phase 4 intro above)
+- [x] `baseline_controller.py`: a working Ryu learning-switch (forwarding only, no QoS yet)
+- [x] Confirm it correctly installs forwarding rules and supports `pingall`
+- [x] Learn the SDN/OVS/Ryu relationship well enough to explain it (see Phase 4 intro above)
 
 **D1 shared contribution**
-- [ ] Confirm packets from Person A pass through the switch correctly under your controller (Socket–SDN Integration)
-- [ ] Explain the control path vs. data path for the architecture write-up (Problem Understanding & Architecture)
+- [x] Confirm packets from Person A pass through the switch correctly under your controller (Socket–SDN Integration)
+- [x] Explain the control path vs. data path for the architecture write-up (Problem Understanding & Architecture)
 
 **D2 tasks (target: Dynamic SDN Functionality, 6 marks)**
-- [ ] `qos_controller.py`: classification rules — match UDP by destination port → `SetQueue()` → output (using Person B's queue IDs, Section 1.5 mapping) — Phase 4.1
+- [ ] `qos_controller.py` (static QoS; written, fix in progress: `OFPActionSetQueue`, rules on s1 only): classification rules — match UDP by destination port → `SetQueue()` → output (using Person B's queue IDs, Section 1.5 mapping) — Phase 4.1
 - [ ] Verify with `ovs-ofctl dump-flows s1` that rule packet-counters increase correctly
 - [ ] Rerun the congestion experiment with priority active and compare against the saved baseline — Phase 4.2
 - [ ] `dynamic_controller.py`: periodic stats polling (`hub.sleep` loop) + live rule updates mid-experiment (e.g., shifting which flow is HIGH every 30 seconds) — Phase 4.3
@@ -368,7 +380,8 @@ h3 python3 sender.py --ip 10.0.0.4 --flow low        --size 1000 --rate 3 --coun
 h3 python3 sender.py --ip 10.0.0.4 --flow background --size 1400 --rate 4 --count 10714 --run-id 1 &
 # counts above = 30 seconds of traffic:  count = rate * 1e6 * seconds / (size * 8)
 
-# results: one row per flow per run in metrics.csv (next to metrics.py); fairness.csv when all 4 flows finished
+# results (runner): results/metrics.csv = one row per flow per run, results/fairness.csv when all expected flows finished,
+# results/manifest.csv = which run_id was which scenario, experiments/<label>/summary.csv = rows to commit
 
 # Check the controller's installed rules and their hit-counters
 ovs-ofctl -O OpenFlow13 dump-flows s1
@@ -426,10 +439,22 @@ h3 ──┘
 - Support two modes: no controller (first tests) and `RemoteController` pointing at Ryu.
 - Keep the bottleneck queue short (about 100 packets).
 
-### Bottleneck Check
+### Bottleneck Check (done)
 
 - Verify the cap with iperf (send 20 Mbps over UDP, expect about 5 Mbps received).
 - Check early whether the `TCLink` cap and OVS queues can share the bottleneck port. If not, make the 5 Mbps cap with the OVS queue instead, and write the decision down.
+
+**Decision** the two cannot share the port. Therefore:
+
+- D1 baseline runs (no congestion, congestion without SDN, `baseline_ryu`) use `--cap tclink`: one first-in-first-out queue, which is the "no QoS" situation.
+- Static and dynamic QoS runs use `--cap none` (an unlimited link) plus OVS QoS on `s1-eth4`: `max-rate=5000000` makes the 5 Mbps cap and queues 1 to 4 (see the Section 1.5 table) are attached with `ovs-vsctl`. The queue length is set to 100 packets to match the TCLink baseline.
+- The report states that the baseline uses TCLink's single queue and QoS runs use OVS queues.
+
+**Comparability note.** 
+- The baseline and the QoS runs are built differently
+- the baseline uses TCLink's single queue, while static and dynamic use OVS queues.
+- To keep the two comparable, `setup_queues` sets the queue length of `s1-eth4` to 100 packets (`ip link set s1-eth4 txqueuelen 100`, run before the QoS is attached), which matches the 100-packet limit TCLink puts on the baseline queue (`max_queue_size=100`, shown as `netem ... limit 100`).
+- Without this, the OVS queues would probably use the interface default of 1000 packets, and loss and delay would differ for a reason unrelated to priority.
 
 ### Running the UDP Application (done)
 
@@ -439,10 +464,11 @@ h3 ──┘
 
 ### Experiment Runner (`mininet/run_experiment.py`) (done)
 
-
 - Run one scenario with one command: *no congestion* (flows 1 and 2) or *congestion* (all four).
+- Options: `--mode none|remote`, `--duration` (seconds, turned into `--count` with the formula above), `--repeat`, `--run-id` (a new one for every run), `--label`.
 - Start the receiver first, wait for the senders to finish plus about 2 s, then stop the receiver.
-- Record which `run_id` belongs to which scenario in a small manifest file.
+- Logs go to `results/<scenario>_<run_id>/`; `results/manifest.csv` records which `run_id` belongs to which scenario; `experiments/<label>/summary.csv` keeps the rows to commit (`results/` is in `.gitignore`).
+- Labels: `baseline` (no controller), `baseline_ryu` (forwarding-only controller), `static`, `dynamic`; use `test` for practice runs.
 
 ### Baseline
 
@@ -451,12 +477,12 @@ h3 ──┘
 
 ### Completion Checklist
 
-- [ ] `pingall` works (no-controller mode and with Ryu)
-- [ ] iperf confirms about 5 Mbps
-- [ ] Receiver on h4 receives from h1, h2 and h3
-- [ ] Demand (10 Mbps) > capacity (5 Mbps), all flows lose packets
-- [ ] `run_experiment.py` runs a scenario with one command
-- [ ] Baseline saved (3 runs per scenario)
-- [ ] TCLink vs. OVS-queue decision written down
+- [x] `pingall` works (no-controller mode done; with Ryu pending)
+- [x] iperf confirms about 5 Mbps (20 Mbps offered, about 4.9 Mbit/s received, `TCLink` cap)
+- [x] Receiver on h4 receives from h1, h2 and h3
+- [x] Demand (10 Mbps) > capacity (5 Mbps), all flows lose packets
+- [x] `run_experiment.py` runs a scenario with one command
+- [x] Baseline saved (3 runs per scenario, label `baseline`)
+- [x] TCLink vs. OVS-queue decision written down (see the decision above)
 
 ---
