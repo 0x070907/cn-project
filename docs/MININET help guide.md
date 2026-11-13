@@ -58,14 +58,11 @@ sudo python3 mininet/topology.py --mode remote
 
  Options: `--mode none|remote` and `--cap tclink|none` (`tclink` = the cable is limited to 5 Mbps, `none` = unlimited cable for OVS-queue limiting).
 
-### One scenario: `mininet/run_experiment.py`
+## 3. Experiment 1 - No controller
 
 ```bash
-sudo python3 mininet/run_experiment.py no_congestion --duration 30
-sudo python3 mininet/run_experiment.py congestion --duration 30
-sudo python3 mininet/run_experiment.py congestion --duration 10 --run-id 4 --label test   # a short test run with its own run id
-sudo python3 mininet/run_experiment.py no_congestion --duration 10 --repeat 3 --run-id 5 --label test   # 3 runs, ids 5, 6, 7
-sudo python3 mininet/run_experiment.py congestion --mode remote --repeat 3 --label baseline_ryu   # needs Ryu running
+sudo python3 mininet/run_experiment.py congestion --duration 10 --run-id 4 --label baseline   # no controller mode,so label=baseline
+sudo python3 mininet/run_experiment.py no_congestion --duration 10 --repeat 3 --run-id 5 --label baseline  # 3 runs, ids 5, 6, 7
 ```
 
 | Option | Meaning | Default |
@@ -97,9 +94,9 @@ The script builds the network, starts `receiver.py` on h4 and one `sender.py` pe
 
 ---
 
-## 3. Using it with Ryu (3 terminals)
+## 4. Using it with a Ryu controller (Experiment 2 - baseline_ryu)
 
-### 3.1 One-time Ryu setup
+### 4.1 One-time Ryu setup
 
 Ryu is an old project (last release 4.34), so it needs **Python 3.9** and a pinned `eventlet`. Use a separate venv so it doesn't touch the rest of your Python(here,its `uvenv`):
 
@@ -119,7 +116,7 @@ deactivate
 
 - Ryu runs inside `~/ryuenv`. Mininet runs outside it (system Python, with `sudo`).
 
-### 3.2 The 3 terminals
+### 4.2 The 3 terminals
 
 Open three terminals, all in `~/cn-project`. **Start order: Ryu first, then Mininet.**
 
@@ -128,10 +125,11 @@ Open three terminals, all in `~/cn-project`. **Start order: Ryu first, then Mini
 ```bash
 source ~/ryuenv/bin/activate
 cd ~/cn-project
-ryu-manager controller/baseline_controller.py      # or controller/qos_controller.py
+ryu-manager controller/baseline_controller.py     
 ```
 
 Expect `switch connected: dpid=1` and `dpid=2` once Mininet starts. Leave it running; it also prints a line for every QoS rule it installs.
+No rules installed,just forwarding
 
 **Terminal 2: the network** 
 
@@ -150,7 +148,7 @@ tc -s qdisc show dev s1-eth4                   # queue + drops on the bottleneck
 tc -s class show dev s1-eth4                   # per-queue counters (only with OVS queues)
 ```
 
-### 3.3 Between runs
+### 4.3 Between runs
 
 ```bash
 # terminal 2: after exit / Ctrl+C
@@ -159,6 +157,41 @@ sudo mn -c
 ```
 
 Always restart Ryu when you switch controllers, so the old one's learned table is gone.
+
+---
+
+## 5. Experiment 3 - Static QoS
+
+Open three terminals, all in `~/cn-project`. **Start order: Ryu first, then Mininet.**
+
+**Terminal 1: controller**
+
+```bash
+source ~/ryuenv/bin/activate
+ryu-manager controller/qos_controller.py     
+```
+
+Expect `switch connected: dpid=1` and `dpid=2` once Mininet starts. Leave it running; it also prints a line for every QoS rule it installs.
+
+**Terminal 2: the network** 
+
+```bash
+sudo python3 mininet/run_experiment.py congestion --mode remote --cap none --queues --run-id 186 --duration 30 --label static
+```
+
+- **The bug**: rn there's a small bug bcz loses for all flows are 0% and the senders are a bit slow as the packets wait in the sender's socket buffer when the queues are full which also increases the latencies.(will fix next by making sender buffer big,and push the packets directly to the queues and drop them when full)
+
+- the mode must be `remote`,to control the switches in mininet by our controller.
+- cap must be `none` for the ovs queue creation else tclink will be used,also use the option `--queues`
+
+**Terminal 3, about 10 seconds into the run:**
+
+```bash
+sudo ovs-ofctl -O OpenFlow13 dump-flows s1 
+```
+- make sure u run it during the run,bcz all switches are virtual and cleaned up after the run.
+- this cmd shows the 4 qos rules(priority-10 rules) installed on s1 by the sdn controller,each ending in output:"s1-eth4"
+
 
 ---
 
