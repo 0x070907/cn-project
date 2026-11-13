@@ -81,6 +81,16 @@ def main() -> None:
     sock: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(0.5)
 
+    send_buffer_request: int = 8 * 1024 * 1024  #requesting 8 MiB
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, send_buffer_request)
+
+    send_buffer: int = sock.getsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF)  # linux reports double the requested value( approx. 16 MiB)
+
+    if send_buffer < 1024 * 1024:   #anything above 1 MiB is plenty for a 100-packet queue
+        print(f"warning:send buffer is only {send_buffer} bytes, the sender may be slowed down")
+
+    elif args.verbose:
+        print(f"send buffer = {send_buffer} bytes")
 
     # sends a START or END and waits for the matching ACK, resending up to 5 times (0.5s timeout each)
     # control messages are retried because losing one would ruin the run

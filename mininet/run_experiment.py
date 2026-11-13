@@ -287,6 +287,11 @@ def main() -> None:
     if os.geteuid() != 0:     # geteuid() == 0 means "I am root",that is cn-project/
         sys.exit("Mininet needs root: run it with  sudo python3 mininet/run_experiment.py ...")
 
+    # senders ask for an 8 MB send buffer,linux caps that request at wmem_max,so raise the cap on our machines
+    subprocess.run(["sysctl", "-w", "net.core.wmem_max=8388608"],
+                   check=False, stdout=subprocess.DEVNULL)
+
+
     if shutil.which("python3") is None:  # checks if python3 on this machine's path
         sys.exit("python3 not found")
 
