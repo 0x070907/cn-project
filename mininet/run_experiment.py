@@ -24,7 +24,7 @@ from typing import IO, TYPE_CHECKING
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from mininet.log import setLogLevel      # noqa: E402
-from topology import build              # noqa: E402
+from topology import build, setup_queues   # noqa: E402
 
 if TYPE_CHECKING:
     from mininet.net import Mininet     # only needed for type hints
@@ -197,7 +197,9 @@ def run_once(scenario: str,
              mode: str,
              duration: int, 
              run_id: int,
-             label: str
+             label: str,
+             cap: str = "tclink",
+             queues: bool = False
              ) -> None:
  
     out_dir = os.path.join(RESULTS, f"{scenario}_{run_id}")    # logs of this run
@@ -205,8 +207,11 @@ def run_once(scenario: str,
     logs: list[IO[str]] = []
     failed: list[str] = []
 
-    net = build(mode)   # build() comes from topology.py; creates but does not start
+    net = build(mode, cap)   # build() comes from topology.py; creates but does not start
     net.start()         # now the fake hosts, switches and cables really exist
+    
+    if queues:
+        setup_queues()  # OVS queues 1-4 on s1-eth4 (needs the switches to be running)
 
     try:
         receiver = start_receiver(net, out_dir, logs, len(SCENARIOS[scenario]))
@@ -232,7 +237,7 @@ def run_once(scenario: str,
 
     write_manifest(run_id, scenario, mode, duration)
     rows = rows_for_run(run_id)
-    print(f"\nscenario={scenario} mode={mode} run_id={run_id}  (logs: {out_dir})")
+    print(f"\nscenario={scenario} mode={mode} cap={cap} queues={queues} run_id={run_id}  (logs: {out_dir})")
     print_rows(rows)
     append_summary(label, scenario, mode, rows)
 
@@ -249,6 +254,14 @@ def main() -> None:
                         default="none",
                         help="none = no controller, remote = Ryu controller")
 
+    parser.add_argument("--cap",
+                        choices=["tclink", "none"],
+                        default="tclink",
+                        help="tclink = TCLink limits the cable to 5 Mbps (baseline); none = no limit from Mininet")
+    parser.add_argument("--queues",
+                        action="store_true",
+                        help="create OVS queues 1-4 on s1-eth4, which also make the 5 Mbps cap (needs --cap none)")
+
     parser.add_argument("--duration", type=int, default=30, help="seconds of traffic")
     parser.add_argument("--repeat", type=int, default=1, help="how many times to run it")
     parser.add_argument("--run-id",
@@ -261,6 +274,8 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    if args.queues and args.cap != "none":
+        parser.error("--queues needs --cap none (OVS replaces the TCLink limit)")
     if args.duration < 1:
         parser.error("--duration must be at least 1 second")
     if args.repeat < 1:
@@ -281,7 +296,13 @@ def main() -> None:
 
     for i in range(args.repeat):
         print(f"--- run {i + 1} of {args.repeat} ---")
-        run_once(args.scenario, args.mode, args.duration, base_id + i, args.label)
+        run_once(args.scenario, 
+                 args.mode, 
+                 args.duration,
+                 base_id + i,
+                 args.label,
+                 args.cap, 
+                 args.queues)
         if i + 1 < args.repeat:
             time.sleep(2)      # short pause before the next run
 
