@@ -206,11 +206,11 @@ h1 ─────────────── OVS ─────────
 
 **Phase 4 checkpoint - confirm before moving on:**
 
-- [ ] **Controller Setup:** Ryu connects to OVS and basic forwarding works.
-- [ ] **Flow Classification:** All UDP flows are identified correctly.
-- [ ] **Priority Mapping:** HIGH, MEDIUM, and LOW priorities are assigned.
-- [ ] **QoS Configuration:** OVS queues enforce priorities under congestion.
-- [ ] **Baseline Comparison:** No-SDN and SDN-priority results are recorded.
+- [x] **Controller Setup:** Ryu connects to OVS and basic forwarding works.
+- [x] **Flow Classification:** All UDP flows are identified correctly.
+- [x] **Priority Mapping:** HIGH, MEDIUM, and LOW priorities are assigned.
+- [x] **QoS Configuration:** OVS queues enforce priorities under congestion.
+- [x] **Baseline Comparison:** No-SDN and SDN-priority results are recorded.
 - [ ] **Performance Analysis:** Throughput, latency, and packet loss are compared per flow.
 - [ ] **Dynamic Policies:** Flow priorities change while traffic is running.
 - [ ] **Final Validation:** Results are repeatable and observations documented.
@@ -301,8 +301,8 @@ The "Shared" row is deliberate — the rubric rewards integration and viva under
 - [x] Help draw the architecture diagram — you know the topology best (Problem Understanding & Architecture)
 
 **D2 tasks (target: half of Dynamic SDN Functionality)**
-- [ ] Create OVS queues on the bottleneck port (`ovs-vsctl`): one queue per flow, each with min/max rate
-- [ ] Hand off queue IDs to Person C for the controller's `SetQueue()` rules
+- [x] Create OVS queues on the bottleneck port (`ovs-vsctl`): one queue per flow, each with min/max rate
+- [x] Hand off queue IDs to Person C for the controller's `SetQueue()` rules
 - [ ] Script the experiment runner so all five runs (Phase 6 table) are repeatable with one command
 
 **D2 shared contribution**
@@ -323,9 +323,9 @@ The "Shared" row is deliberate — the rubric rewards integration and viva under
 - [x] Explain the control path vs. data path for the architecture write-up (Problem Understanding & Architecture)
 
 **D2 tasks (target: Dynamic SDN Functionality, 6 marks)**
-- [ ] `qos_controller.py` (static QoS; written, fix in progress: `OFPActionSetQueue`, rules on s1 only): classification rules — match UDP by destination port → `SetQueue()` → output (using Person B's queue IDs, Section 1.5 mapping) — Phase 4.1
-- [ ] Verify with `ovs-ofctl dump-flows s1` that rule packet-counters increase correctly
-- [ ] Rerun the congestion experiment with priority active and compare against the saved baseline — Phase 4.2
+- [x] `qos_controller.py` (static QoS): classification rules — match UDP by destination port → `SetQueue()` → output (using Person B's queue IDs, Section 1.5 mapping) — Phase 4.1
+- [x] Verify with `ovs-ofctl dump-flows s1` that rule packet-counters increase correctly
+- [x] Rerun the congestion experiment with priority active and compare against the saved baseline — Phase 4.2
 - [ ] `dynamic_controller.py`: periodic stats polling (`hub.sleep` loop) + live rule updates mid-experiment (e.g., shifting which flow is HIGH every 30 seconds) — Phase 4.3
 
 **D2 shared contribution**
