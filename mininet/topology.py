@@ -21,7 +21,7 @@ BOTTLENECK_PORT_NAME: str = "s1-eth4"   # s1's port towards s2 (OpenFlow port 4)
 
 # queue id -> guaranteed minimum rate in bit/s
 # ids: 1 = HIGH, 2 = MEDIUM, 3 = LOW, 4 = BACKGROUND
-QUEUE_MIN_RATES: dict[int, int] = {1: 2_000_000, 2: 1_500_000, 3: 1_000_000, 4: 500_000}
+QUEUE_MIN_RATES = {1: 1_300_000, 2: 2_300_000, 3: 700_000, 4: 700_000}   # sums to 5 Mbps
 
 
 def build(mode: str = "none", cap: str = "tclink") -> Mininet:  # [--mode none|remote] [--cap tclink|none]
