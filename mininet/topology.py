@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 
 from mininet.cli import CLI
 from mininet.link import TCLink
@@ -16,6 +17,11 @@ BOTTLENECK_MBPS: int = 5       # speed of the s1-s2 cable
 QUEUE_PACKETS: int = 100       # waiting line in front of that cable
 CONTROLLER_IP: str = "127.0.0.1"
 CONTROLLER_PORT: int = 6653    # the port Ryu listens on by default
+BOTTLENECK_PORT_NAME: str = "s1-eth4"   # s1's port towards s2 (OpenFlow port 4)
+
+# queue id -> guaranteed minimum rate in bit/s
+# ids: 1 = HIGH, 2 = MEDIUM, 3 = LOW, 4 = BACKGROUND
+QUEUE_MIN_RATES: dict[int, int] = {1: 2_000_000, 2: 1_500_000, 3: 1_000_000, 4: 500_000}
 
 
 def build(mode: str = "none", cap: str = "tclink") -> Mininet:  # [--mode none|remote] [--cap tclink|none]
@@ -69,12 +75,40 @@ def build(mode: str = "none", cap: str = "tclink") -> Mininet:  # [--mode none|r
         # bw=5 means at most 5 Mbps. max_queue_size=100 means at most 100 packets may wait in line(the queue in front of the cable)
         # when the line is full, new packets are dropped and measured as loss
         net.addLink(s1, s2, bw=BOTTLENECK_MBPS, max_queue_size=QUEUE_PACKETS)
-    else:
+
+    else:   # cap = none => used when we build the network and connect to controller & the ovs queues
         net.addLink(s1, s2)
 
     # cable from s2 to the receiver (no limit)
     net.addLink(s2, h4)
     return net
+
+def setup_queues() -> None:
+ 
+    port = BOTTLENECK_PORT_NAME
+    cap = str(BOTTLENECK_MBPS * 1_000_000)      # 5 Mbps in bit/s
+
+    # 1. remove old QoS/queue records from the ovs-vsctl db ,so repeated runs do not pile up 
+    subprocess.run(["ovs-vsctl", "clear", "port", port, "qos"], check=False)
+    subprocess.run(["ovs-vsctl", "--all", "destroy", "qos"], check=False)
+    subprocess.run(["ovs-vsctl", "--all", "destroy", "queue"], check=False)
+
+    # 2. waiting line of 100 packets (same size as TCLink's max_queue_size in the baseline for compatibility)
+    subprocess.run(["ip", "link", "set", port, "txqueuelen", str(QUEUE_PACKETS)], check=True)
+
+    # 3. attach one QoS  with queues 1-4 to the s1-eth4 port,so the bottleneck=5Mbps is due to the max_rate given here
+    # this creates a one long cmd and is ran for every run
+    cmd = ["ovs-vsctl", "--", "set", "port", port, "qos=@newqos",
+           "--", "--id=@newqos", "create", "qos", "type=linux-htb",
+           f"other-config:max-rate={cap}"]
+    
+    cmd += [f"queues:{q}=@q{q}" for q in QUEUE_MIN_RATES]
+
+    for q, min_rate in QUEUE_MIN_RATES.items():
+        cmd += ["--", f"--id=@q{q}", "create", "queue",
+                f"other-config:min-rate={min_rate}", f"other-config:max-rate={cap}"]
+    subprocess.run(cmd, check=True)
+
 
 # this will never run unless you run it independently like sudo python3 mininet/topology.py
 # bcz we use  only the build() of this file in run_experiment.py
@@ -82,11 +116,21 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()   # [--mode none|remote] [--cap tclink|none]
     parser.add_argument("--mode", choices=["none", "remote"], default="none")
     parser.add_argument("--cap", choices=["tclink", "none"], default="tclink")
+    parser.add_argument("--queues", action="store_true",
+                        help="create OVS queues 1-4 on s1-eth4 (needs --cap none)")
+    
     args = parser.parse_args()
+
+    if args.queues and args.cap != "none":
+        parser.error("--queues needs --cap none (OVS replaces the TCLink limit)")
 
     setLogLevel("info")     
     net = build(args.mode, args.cap)
     net.start()       # actually creates the fake computers, switches and cables
+
+    if args.queues:
+        setup_queues()
+
     CLI(net)       # gives you the mininet> prompt until you type exit
     net.stop()      # removes everything again
 
