@@ -30,7 +30,6 @@ if __package__ in (None, ""):
 from analysis.schema import (  # noqa: E402
     CANONICAL_EXPERIMENTS,
     COMPARISON_EXPERIMENTS,
-    EXPECTED_FLOWS,
     FAIRNESS_FIELDS,
     FLOWS,
     KNOWN_MANIFEST_MODES,
@@ -416,15 +415,30 @@ def validate_fairness(report: Report, path: Path) -> dict[int, list[int]]:
                 f"jains_fairness={jain} is greater than 1",
             )
 
+        # fairness.csv always has four columns.  For no_congestion only two
+        # flows ran, so the receiver computed the index over the nonzero
+        # entries; for a congestion run with a genuinely zero-throughput flow
+        # it computed over all four.  Accept either interpretation.
+        candidates: list[float] = []
         positive = [value for value in throughputs if value > 0]
-        if jain is not None and positive:
-            wanted = sum(positive) ** 2 / (len(positive) * sum(value * value for value in positive))
-            if abs(jain - wanted) > 1e-4:
+        if positive:
+            candidates.append(
+                sum(positive) ** 2
+                / (len(positive) * sum(value * value for value in positive))
+            )
+        if throughputs and sum(throughputs) > 0:
+            candidates.append(
+                sum(throughputs) ** 2
+                / (len(throughputs) * sum(value * value for value in throughputs))
+            )
+        if jain is not None and candidates:
+            if min(abs(jain - wanted) for wanted in candidates) > 1e-4:
                 report.warning(
                     "fairness_mismatch",
                     path,
                     line,
-                    f"jains_fairness={jain} but recomputed over nonzero flows={wanted:.6f}",
+                    f"jains_fairness={jain} but recomputed value(s) are "
+                    + ", ".join(f"{wanted:.6f}" for wanted in candidates),
                 )
 
         if run_id is not None:
@@ -594,6 +608,13 @@ def validate_per_second(report: Report, path: Path) -> dict[tuple[int, str], lis
 
         second = _parse_int(report, path, line, row, "second")
         bucket_seconds = _parse_float(report, path, line, row, "bucket_seconds")
+        if bucket_seconds is not None and bucket_seconds <= 0:
+            report.error(
+                "invalid_bucket_seconds",
+                path,
+                line,
+                f"bucket_seconds={bucket_seconds} must be > 0",
+            )
         expected = _parse_int(report, path, line, row, "expected_packets")
         unique = _parse_int(report, path, line, row, "unique_received")
         lost = _parse_int(report, path, line, row, "lost_packets")
