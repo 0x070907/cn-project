@@ -757,6 +757,7 @@ def validate_final_layout(
     report: Report,
     summaries: list[dict[str, str]],
     fairness_rows: dict[int, list[int]],
+    per_second_runs: set[int],
     per_second_present: bool,
 ) -> None:
     """Check the five-experiment, three-repeat final layout."""
@@ -852,14 +853,28 @@ def validate_final_layout(
                 f"run_id={run_id} is used by more than one experiment: {sorted(names)}",
             )
 
-    if "dynamic" in by_canonical and not per_second_present:
-        report.error(
-            "final_missing_per_second",
-            None,
-            None,
-            "dynamic experiment exists but results/per_second.csv is missing; "
-            "the surge timeline cannot be drawn",
-        )
+    if "dynamic" in by_canonical:
+        if not per_second_present:
+            report.error(
+                "final_missing_per_second",
+                None,
+                None,
+                "dynamic experiment exists but results/per_second.csv is missing; "
+                "the surge timeline cannot be drawn",
+            )
+        else:
+            dynamic_runs = {
+                int(entry["run_id"])
+                for entry in by_canonical["dynamic"]
+                if str(entry.get("run_id", "")).isdigit()
+            }
+            for run_id in sorted(dynamic_runs - per_second_runs):
+                report.error(
+                    "final_dynamic_run_without_per_second",
+                    None,
+                    None,
+                    f"dynamic run_id={run_id} has no rows in results/per_second.csv",
+                )
 
     for name in COMPARISON_EXPERIMENTS:
         if name not in by_canonical:
@@ -893,9 +908,11 @@ def validate_all(
     manifest_rows = validate_manifest(report, manifest_path)
 
     if per_second_path.exists():
-        validate_per_second(report, per_second_path)
+        per_second_locations = validate_per_second(report, per_second_path)
+        per_second_runs = {run_id for run_id, _flow in per_second_locations}
         per_second_present = True
     else:
+        per_second_runs = set()
         per_second_present = False
         report.warning(
             "missing_per_second",
@@ -968,7 +985,13 @@ def validate_all(
     )
 
     if final:
-        validate_final_layout(report, summaries, fairness_rows, per_second_present)
+        validate_final_layout(
+            report,
+            summaries,
+            fairness_rows,
+            per_second_runs,
+            per_second_present,
+        )
 
     if strict:
         for warning in report.warnings:
