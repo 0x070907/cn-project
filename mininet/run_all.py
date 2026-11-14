@@ -1,4 +1,9 @@
-"""Run all 4 experiments with one command => refer docs/MININET help guide.md"""
+"""Run all 4 experiments with one command => refer docs/MININET help guide.md
+
+   sudo python3 mininet/run_all.py                     # all 4, 3 repeats each, 30 s
+    sudo python3 mininet/run_all.py --only static       # just one
+    sudo python3 mininet/run_all.py --dry-run           # print the commands, run nothing
+"""
 
 #For each exp it starts the right Ryu controller (if one is needed),calls run_experiment.py,then stops Ryu and cleans Mininet before the next one
 
@@ -112,17 +117,31 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="run the 4 experiments with one command")
 
-    parser.add_argument("--only", choices=[*EXPERIMENTS, *EXTRA], help="run just this experiment")
-    parser.add_argument("--duration", type=int, default=30, help="seconds of traffic per run")
-    parser.add_argument("--repeat", type=int, default=3, help="runs per experiment")
-    parser.add_argument("--dry-run", action="store_true", help="print the commands and exit")
+    parser.add_argument("--only", choices=[*EXPERIMENTS, *EXTRA], 
+                        help="run just this experiment")
+    parser.add_argument("--duration", type=int, default=30, 
+                        help="seconds of traffic per run")
+    parser.add_argument("--repeat", type=int, default=3, 
+                        help="runs per experiment")
+    parser.add_argument("--dry-run", action="store_true", 
+                        help="print the commands and exit")
+    parser.add_argument("--scenario", choices=["no_congestion", "congestion", "surge"],
+                        help="with --only: run that policy on a different scenario")
 
     args = parser.parse_args()
+
+    if args.scenario and not args.only:
+        sys.exit("--scenario needs --only,e.g. --only baseline --scenario congestion")
 
     if not args.dry_run and os.geteuid() != 0:
         sys.exit("needs root: sudo python3 mininet/run_all.py")
 
     everything = {**EXPERIMENTS, **EXTRA}
+
+    if args.scenario: #if some custom scenario needed,then acc change the options to run the cmd
+        label, _, controller, options = everything[args.only]
+        everything[args.only] = (label, args.scenario, controller, options)
+
     names = [args.only] if args.only else list(EXPERIMENTS)
 
     clean_mininet() if not args.dry_run else None

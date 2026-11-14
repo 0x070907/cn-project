@@ -319,6 +319,8 @@ def main() -> None:
         parser.error("--repeat must be at least 1")
     if args.run_id is not None and args.run_id < 0:
         parser.error("--run-id must be 0 or more")
+    if args.scenario == "surge" and args.duration <= max(START_DELAYS["surge"].values()):
+        parser.error("surge needs --duration longer than its start delay (10 s)")
 
     # Mininet creates network devices, which only root may do
     if os.geteuid() != 0:     # geteuid() == 0 means "I am root",that is cn-project/
