@@ -201,6 +201,16 @@ The controller is responsible for:
 The collected measurements are processed to evaluate the behaviour of the
 network under different conditions.
 
+The offline pipeline is documented in
+[`analysis/README.md`](analysis/README.md), with the report scaffold in
+[`docs/RESULTS.md`](docs/RESULTS.md). It validates the CSVs, writes the
+per-flow median and Jain fairness tables, and generates the comparison and
+dynamic-surge figures:
+
+```bash
+python3 -m analysis.analyze
+```
+
 ---
 
 ## 5. Traffic Classes
