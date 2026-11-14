@@ -29,6 +29,7 @@ class RunState(TypedDict):
     latencies_ns: list[int]    # one latency sample per unique packet
     duplicates: int
     out_of_order: int
+    second_buckets: dict[int, metrics.SecondBucket]  # second since first packet -> packets in that second
 
 
 def main() -> None:
@@ -123,6 +124,7 @@ def main() -> None:
                                 "latencies_ns": [],
                                 "duplicates": 0,
                                 "out_of_order": 0,
+                                "second_buckets": {},
                             }
                             if verbose:
                                 print(
@@ -207,9 +209,13 @@ def main() -> None:
                     run["out_of_order"] += 1
 
                 # we track payload size and latency for metrics
-                # the first data packet starts the clock for the duration calculation
+                # the first data packet starts the clock for the duration calculation.
+                # recv_ts_ns is taken before packet parsing, so it is the most
+                # accurate arrival time available.
                 if run["started_at"] is None:
-                    run["started_at"] = time.monotonic_ns()
+                    run["started_at"] = recv_ts_ns
+
+                latency_ns = recv_ts_ns - timestamp
 
                 run["sequences"].add(sequence_number)
                 run["last_sequence"] = max(
@@ -217,8 +223,20 @@ def main() -> None:
                 )
 
                 run["payload_bytes"] += len(payload)
-                run["latencies_ns"].append(recv_ts_ns - timestamp)  # this records the timestamp before packet parsing & other receiver processing
+                run["latencies_ns"].append(latency_ns)  # this records the timestamp before packet parsing & other receiver processing
                 # (valid because sender and receiver share one clock, which holds on localhost and inside mininet)
+
+                # Split the same packets into one-second buckets for the surge
+                # timeline.  second=0 is the second in which the first packet
+                # of this flow arrived.
+                second = max(0, (recv_ts_ns - run["started_at"]) // 1_000_000_000)
+                bucket = run["second_buckets"].setdefault(
+                    second,
+                    {"sequences": set(), "payload_bytes": 0, "latencies_ns": []},
+                )
+                bucket["sequences"].add(sequence_number)
+                bucket["payload_bytes"] += len(payload)
+                bucket["latencies_ns"].append(latency_ns)
 
                 last_sequence[flow_id] = max(last_sequence[flow_id], sequence_number)
                 if verbose:
@@ -279,6 +297,15 @@ def main() -> None:
                         payload_bytes=run["payload_bytes"],
                         duration_seconds=duration_seconds,
                         latencies_ns=run["latencies_ns"],
+                    )
+
+                    metrics.record_per_second(
+                        experiment_id=experiment_id,
+                        run_id=run_id,
+                        flow=flow_names[flow_id],
+                        buckets=run["second_buckets"],
+                        expected_packets=expected,
+                        duration_seconds=duration_seconds,
                     )
 
                     # save each flow's measured goodput for this experiment

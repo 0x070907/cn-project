@@ -593,12 +593,12 @@ def validate_per_second(report: Report, path: Path) -> dict[tuple[int, str], lis
             continue
 
         second = _parse_int(report, path, line, row, "second")
+        bucket_seconds = _parse_float(report, path, line, row, "bucket_seconds")
         expected = _parse_int(report, path, line, row, "expected_packets")
         unique = _parse_int(report, path, line, row, "unique_received")
         lost = _parse_int(report, path, line, row, "lost_packets")
         loss_pct = _parse_float(report, path, line, row, "packet_loss_pct")
         payload = _parse_int(report, path, line, row, "payload_bytes")
-        duration = 1.0
         goodput = _parse_float(report, path, line, row, "goodput_mbps")
         avg_latency = _parse_float(
             report, path, line, row, "avg_latency_ms", required=False
@@ -621,11 +621,14 @@ def validate_per_second(report: Report, path: Path) -> dict[tuple[int, str], lis
             seconds.add(second)
 
         if expected is not None and unique is not None and unique > expected:
-            report.error(
-                "unique_exceeds_expected",
+            # The per-second expected count is an even-spread estimate, so a
+            # burst can legitimately arrive in one second.  Only the per-run
+            # metrics.csv row is guaranteed to be an exact count.
+            report.warning(
+                "second_unique_above_estimate",
                 path,
                 line,
-                f"unique_received={unique} exceeds expected_packets={expected}",
+                f"unique_received={unique} exceeds the estimated expected_packets={expected}",
             )
         if expected is not None and unique is not None and lost is not None:
             wanted_lost = max(0, expected - unique)
@@ -645,14 +648,20 @@ def validate_per_second(report: Report, path: Path) -> dict[tuple[int, str], lis
                     line,
                     f"packet_loss_pct={loss_pct} but lost/expected={wanted_pct:.4f}",
                 )
-        if payload is not None and goodput is not None:
-            wanted_goodput = payload * 8 / duration / 1_000_000
+        if (
+            payload is not None
+            and goodput is not None
+            and bucket_seconds is not None
+            and bucket_seconds > 0
+        ):
+            wanted_goodput = payload * 8 / bucket_seconds / 1_000_000
             if abs(goodput - wanted_goodput) > 0.001:
                 report.error(
                     "goodput_mismatch",
                     path,
                     line,
-                    f"goodput_mbps={goodput} but payload*8/second={wanted_goodput:.6f}",
+                    f"goodput_mbps={goodput} but "
+                    f"payload*8/bucket_seconds={wanted_goodput:.6f}",
                 )
         if unique == 0 and any(value is not None for value in (avg_latency, p95)):
             report.warning(

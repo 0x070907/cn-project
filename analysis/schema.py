@@ -64,6 +64,7 @@ PER_SECOND_FIELDS: tuple[str, ...] = (
     "run_id",
     "flow",
     "second",
+    "bucket_seconds",
     "expected_packets",
     "unique_received",
     "lost_packets",

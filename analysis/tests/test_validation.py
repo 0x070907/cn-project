@@ -61,6 +61,7 @@ def per_second_row(run_id: int, flow: str) -> dict[str, str | int | float]:
         "run_id": run_id,
         "flow": flow,
         "second": 0,
+        "bucket_seconds": 1.0,
         "expected_packets": row["expected_packets"],
         "unique_received": row["unique_received"],
         "lost_packets": row["lost_packets"],

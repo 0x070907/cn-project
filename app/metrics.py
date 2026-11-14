@@ -2,16 +2,34 @@
 from __future__ import annotations
 
 import csv
+import os
 import statistics
 import time
-from collections.abc import Collection, Iterable, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from pathlib import Path
+from typing import TypedDict
 # imp (fix this later when done with the full thingy):  currently we assume that the sender and receivers monotonic clocks share the same time base, it works for localhost setup but may not work for mininet  
 
-# results go in results/, one level above app/, no matter where the script is run from
-results_dir = Path(__file__).resolve().parent.parent / "results"
+# results go in results/, one level above app/, no matter where the script is run from.
+# QOS_RESULTS_DIR is only used by tests/local checks; the experiment runner keeps
+# the default so all normal runs write to the same place.
+_results_override = os.environ.get("QOS_RESULTS_DIR")
+results_dir = (
+    Path(_results_override).expanduser()
+    if _results_override
+    else Path(__file__).resolve().parent.parent / "results"
+)
 csv_path = results_dir / "metrics.csv"
 fairness_path = results_dir / "fairness.csv"
+per_second_path = results_dir / "per_second.csv"
+
+
+class SecondBucket(TypedDict):
+    """Packets that arrived during one second of one flow's run."""
+
+    sequences: set[int]
+    payload_bytes: int
+    latencies_ns: list[int]
 
 # column order of metrics.csv: one row per flow per run
 fields: list[str] = [
@@ -29,6 +47,26 @@ fields: list[str] = [
     "goodput_mbps",
     "avg_latency_ms",
     "p50_latency_ms",
+    "p95_latency_ms",
+]
+
+# one row per flow per second, used by the dynamic surge timeline.  The totals
+# in metrics.csv stay the authoritative per-run numbers; these rows split the
+# same packets over time so the graph can show what changed while the run was
+# still going.
+per_second_fields: list[str] = [
+    "experiment_id",
+    "run_id",
+    "flow",
+    "second",
+    "bucket_seconds",
+    "expected_packets",
+    "unique_received",
+    "lost_packets",
+    "packet_loss_pct",
+    "payload_bytes",
+    "goodput_mbps",
+    "avg_latency_ms",
     "p95_latency_ms",
 ]
 
@@ -120,6 +158,111 @@ def record_run(
         writer.writerow(row)
 
     print(f"saved metrics for {flow} run {run_id}")
+
+
+def record_per_second(
+    experiment_id: str,
+    run_id: int,
+    flow: str,
+    buckets: Mapping[int, SecondBucket],
+    expected_packets: int,
+    duration_seconds: float,
+) -> None:
+    """Append one row per second for a completed flow.
+
+    ``buckets`` is keyed by the integer second since the first data packet.
+    The sender does not transmit a per-second schedule, so the expected packet
+    count for a second is estimated by spreading this flow's known total
+    evenly over the measured duration.  The per-run rows in metrics.csv remain
+    exact; these rows are a timeline view and are labelled as such in the docs.
+    """
+
+    if not buckets:
+        return
+
+    max_second = max(buckets)
+    span_seconds = duration_seconds if duration_seconds > 0 else float(max_second + 1)
+
+    def cumulative_expected(seconds: float) -> int:
+        if expected_packets <= 0 or span_seconds <= 0:
+            return 0
+        fraction = min(max(seconds, 0.0), span_seconds) / span_seconds
+        return int(round(expected_packets * fraction))
+
+    rows: list[dict[str, str | int | float]] = []
+
+    for second in range(max_second + 1):
+        start = float(second)
+        end = min(float(second + 1), span_seconds)
+
+        # A flow whose END arrives very soon after its last packet can leave a
+        # sub-millisecond final bucket.  Keep a positive width so goodput does
+        # not divide by zero.
+        if end <= start:
+            end = start + 1.0
+        bucket_seconds = end - start
+
+        bucket = buckets.get(
+            second,
+            {"sequences": set(), "payload_bytes": 0, "latencies_ns": []},
+        )
+        unique_received = len(bucket["sequences"])
+        expected_this_second = max(
+            0, cumulative_expected(end) - cumulative_expected(start)
+        )
+        lost_packets = max(0, expected_this_second - unique_received)
+
+        if expected_this_second > 0:
+            packet_loss_pct = lost_packets / expected_this_second * 100
+        else:
+            packet_loss_pct = 0.0
+
+        payload_bytes = bucket["payload_bytes"]
+        goodput_mbps = payload_bytes * 8 / bucket_seconds / 1_000_000
+
+        latencies_ms = [
+            latency / 1_000_000
+            for latency in bucket["latencies_ns"]
+            if latency >= 0
+        ]
+
+        rows.append(
+            {
+                "experiment_id": experiment_id,
+                "run_id": run_id,
+                "flow": flow,
+                "second": second,
+                "bucket_seconds": round(bucket_seconds, 6),
+                "expected_packets": expected_this_second,
+                "unique_received": unique_received,
+                "lost_packets": lost_packets,
+                "packet_loss_pct": round(packet_loss_pct, 4),
+                "payload_bytes": payload_bytes,
+                "goodput_mbps": round(goodput_mbps, 6),
+                "avg_latency_ms": (
+                    round(statistics.mean(latencies_ms), 6)
+                    if latencies_ms else ""
+                ),
+                "p95_latency_ms": (
+                    round(percentile(latencies_ms, 95), 6)
+                    if latencies_ms else ""
+                ),
+            }
+        )
+
+    results_dir.mkdir(parents=True, exist_ok=True)
+    file_exists = per_second_path.exists() and per_second_path.stat().st_size > 0
+
+    with per_second_path.open("a", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=per_second_fields)
+
+        if not file_exists:
+            writer.writeheader()
+
+        writer.writerows(rows)
+
+    print(f"saved per-second metrics for {flow} run {run_id}")
+
 
 # Collection: needs len() and has to loop over the values several times,so a single lookup Iterable like a generator would not be safe. it never indexes, so no Sequence needed
 def jains_fairness(throughputs: Collection[float]) -> float | None:
