@@ -53,8 +53,26 @@ SCENARIOS: dict[str, list[str]] = {
     # scenario name -> which flows run
     "no_congestion": ["high", "medium"],                       # 1+2 = 3 Mbps  < 5 Mbps link
     "congestion":    ["high", "medium", "low", "background"],  # 1+2+3+4 = 10 Mbps > 5 Mbps link
+    "surge":         ["high", "medium", "low", "background"],  # same 4 flows, but background joins late
 }
 
+
+START_DELAYS: dict[str, dict[str, int]] = {
+    # scenario -> {flow: seconds to wait before that flow starts}
+    "surge": {"background": 10},
+}
+
+def log_event(out_dir: str, run_id: int, event: str, flow: str, detail: str) -> None:
+
+    # monotonic_ns is the SAME clock the senders/receiver use for send_ts/recv_ts
+    path = os.path.join(out_dir, "events.csv")
+    is_new = not os.path.exists(path)
+
+    with open(path, "a", newline="") as f:
+        writer = csv.writer(f)
+        if is_new:
+            writer.writerow(["ts_ns", "run_id", "event", "flow", "detail"])
+        writer.writerow([time.monotonic_ns(), run_id, event, flow, detail])
 
 # 1. the sender takes a packet count
 def packet_count(size: int, rate_mbps: float, seconds: int) -> int:  #we r again not taking --count and using this formula instead
@@ -96,7 +114,21 @@ def start_senders(net: Mininet,
 
     senders: list[subprocess.Popen] = []
 
-    for name in SCENARIOS[scenario]:
+    delays : dict[str, int] = START_DELAYS.get(scenario, {})
+    t0 : float = time.time()
+
+    # flows with a delay go last
+    for name in sorted(SCENARIOS[scenario], key=lambda n: delays.get(n, 0)):
+
+        delay = delays.get(name, 0)
+        wait = delay - (time.time() - t0)
+
+        if wait > 0:
+            time.sleep(wait)          # the other flows keep running meanwhile
+
+        if delay > 0:
+            log_event(out_dir, run_id, "flow_start", name, f"joined {delay}s into the run")
+
         host, size, rate = FLOWS[name]   #tuple unpacking
         log = open(os.path.join(out_dir, f"sender_{name}.log"), "w")
         logs.append(log)
@@ -109,7 +141,7 @@ def start_senders(net: Mininet,
             "--flow", name,
             "--size", str(size),
             "--rate", str(rate),
-            "--count", str(packet_count(size, rate, duration)),
+            "--count", str(packet_count(size, rate, duration - delay)),  # a late flow only sends for the rest of the run,so the total still ends at 30 s
             "--run-id", str(run_id),        # same number for all senders of this run
         ]
         senders.append(net.get(host).popen(cmd,
@@ -240,6 +272,11 @@ def run_once(scenario: str,
     print(f"\nscenario={scenario} mode={mode} cap={cap} queues={queues} run_id={run_id}  (logs: {out_dir})")
     print_rows(rows)
     append_summary(label, scenario, mode, rows)
+
+    events = os.path.join(out_dir, "events.csv")
+    
+    if os.path.exists(events):
+        shutil.copy(events, os.path.join(EXPERIMENTS, label, f"events_{run_id}.csv"))
 
 
 # 7. the command line
