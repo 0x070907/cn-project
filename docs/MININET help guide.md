@@ -77,7 +77,8 @@ sudo python3 mininet/run_experiment.py no_congestion --duration 10 --repeat 3 --
 > refer the `mininet/run_experiment.py` file for more info abt these cla's
 
 - Use a **new `--run-id` for every run**: all the results are grouped by it, so don't reuse.
-- Use `--label test` for practice runs so they don't end up in `experiments/baseline/`.
+- Labels are the policies:`baseline`, `baseline_ryu`, `static`, `dynamic`. 
+- Practice runs land in the same folder, so the analysis uses only the final (label, scenario) pairs and the 3 latest runs of each (see section 8).
 
 The script builds the network, starts `receiver.py` on h4 and one `sender.py` per flow on h1, h2 and h3, then saves the results.
 
@@ -231,11 +232,12 @@ sudo python3 mininet/run_experiment.py surge --mode remote --cap none --queues -
 ## 7. Run all 4 experiments with one command
 
 ```bash
-sudo python3 mininet/run_all.py                  # all 4, 3 repeats each, 30 s
-sudo python3 mininet/run_all.py --only static    # just this one
+sudo python3 mininet/run_all.py                  # all 4 exps, 3 repeats each, 30 s duration
 sudo python3 mininet/run_all.py --dry-run        # print the commands only
+sudo python3 mininet/run_all.py --only baseline --scenario congestion   # one policy on required scenario
 ```
 
+**These are the pairs considered when all 4 exps run through a single cmd**
 | Experiment | Scenario | Controller | Label |
 |---|---|---|---|
 | baseline | no_congestion | none | `baseline` |
@@ -245,8 +247,24 @@ sudo python3 mininet/run_all.py --dry-run        # print the commands only
 
 - A controller file that does not exist yet is skipped with a message, so it works before `dynamic_controller.py` is written.
 - `--only static_surge` runs the static policy on the surge (the reference for dynamic); it is not part of the default four.
+- if you need a particular scenario which uses a particular policy,u must use `--only` (eg `--only static --scenario no_congestion`)
 
 ---
+
+## 8. Which results the analysis uses
+
+`experiments/<label>/summary.csv` is the data (columns include `scenario, mode, run_id, flow, packet_loss_pct, goodput_mbps, avg_latency_ms, p95_latency_ms`)
+
+Final pairs, using the 3 latest `run_id`s of each:
+
+| label | scenario |
+|---|---|
+| baseline | no_congestion |
+| baseline_ryu | congestion |
+| static | congestion |
+| dynamic | surge |
+| static | surge (reference for dynamic) |
+
 
 ## Troubleshooting (Errors i faced)
 
