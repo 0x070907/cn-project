@@ -10,11 +10,17 @@ from typing import Any, Iterable
 
 from analysis.loader import Dataset, canonical_groups
 from analysis.schema import (
+    CANONICAL_EXPERIMENTS,
     COMPARISON_EXPERIMENTS,
     FLOWS,
+    FLOW_ORDER,
     expected_flows,
     sort_flows,
 )
+
+CANONICAL_ORDER: dict[str, int] = {
+    name: index for index, name in enumerate(CANONICAL_EXPERIMENTS)
+}
 
 FLOW_METRICS: tuple[str, ...] = (
     "goodput_mbps",
@@ -142,6 +148,12 @@ def aggregate_flow_medians(dataset: Dataset) -> list[dict[str, Any]]:
                 }
             )
 
+    table.sort(
+        key=lambda row: (
+            CANONICAL_ORDER.get(str(row["experiment"]), len(CANONICAL_ORDER)),
+            FLOW_ORDER.get(str(row["flow"]), len(FLOW_ORDER)),
+        )
+    )
     return table
 
 
@@ -225,6 +237,12 @@ def aggregate_fairness(dataset: Dataset) -> list[dict[str, Any]]:
                 "background_mbps_median": _median(float(row["background_mbps"]) for row in rows),
             }
         )
+    table.sort(
+        key=lambda row: (
+            CANONICAL_ORDER.get(str(row["experiment"]), len(CANONICAL_ORDER)),
+            str(row["experiment"]),
+        )
+    )
     return table
 
 
