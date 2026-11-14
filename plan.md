@@ -229,7 +229,7 @@ Quantify this with **Jain's Fairness Index** once the basic experiment works —
 
 ### PHASE 6 — Final Results
 
-Your final comparison should cover five experiments:
+Your final comparison covers four experiments (run them all with `sudo python3 mininet/run_all.py`):
 
 | # | Experiment | What it shows |
 |---|---|---|
@@ -237,7 +237,8 @@ Your final comparison should cover five experiments:
 | 2 | Congestion, no SDN | Problem demonstrated |
 | 3 | Congestion + SDN priority | Static fix |
 | 4 | Congestion + dynamic SDN policy | Full solution |
-| 5 | Fairness analysis across the above | Trade-off quantified |
+
+Fairness (Jain's index) is computed across these four
 
 ---
 
@@ -277,12 +278,14 @@ The "Shared" row is deliberate — the rubric rewards integration and viva under
 - [x] Extend to all flows running simultaneously, each with its own size/rate profile
 - [x] Receiver handles all flow ports at once (threads or separate processes)
 - [ ] Logging robust enough for a full multi-minute experiment without errors
-- [ ] `analyze.py`: per-flow throughput, average latency, packet loss, for each of the 5 experiment runs (Phase 6 table)
+- [ ] `analyze.py`: read `experiments/*/summary.csv`; table of per-flow goodput, average + p95 latency and loss % for the 4 experiments (median of the 3 repeats)
 - [x] Compute Jain's Fairness Index per run (Phase 5)
-- [ ] Build comparison graphs (no-congestion vs. congestion-no-SDN vs. static priority vs. dynamic priority)
+- [ ] Build comparison graphs: bar charts per flow for baseline vs baseline_ryu vs static vs dynamic (loss, p95 latency, goodput)
+- [ ] Time graph of the dynamic surge run (goodput, loss, latency per second) with vertical lines from `events.csv` and the controller's policy log (same `monotonic_ns` clock)
+- [ ] Jain's fairness table for the 4 experiments (from `fairness.csv`)
 
 **D2 shared contribution**
-- [ ] Help design the challenging scenario by predicting what the logs *should* show if it works
+- [ ] Predict what the dynamic logs and graphs *should* show on the surge (rules change shortly after t=10 s, HIGH and MEDIUM stay protected)
 - [ ] Write the results section of the documentation
 
 ### 5.2 Person B — Mininet + Network
@@ -303,10 +306,10 @@ The "Shared" row is deliberate — the rubric rewards integration and viva under
 **D2 tasks (target: half of Dynamic SDN Functionality)**
 - [x] Create OVS queues on the bottleneck port (`ovs-vsctl`): one queue per flow, each with min/max rate
 - [x] Hand off queue IDs to Person C for the controller's `SetQueue()` rules
-- [ ] Script the experiment runner so all five runs (Phase 6 table) are repeatable with one command
+- [x] Script the experiment runner so all four experiments are repeatable with one command (`mininet/run_all.py`)
 
 **D2 shared contribution**
-- [ ] Design and trigger the challenging scenario (e.g., congestion spike, sender joining mid-run) — this is primarily a network-level event
+- [x] Design and trigger the challenging scenario: `surge` (BACKGROUND joins at t=10 s, `events.csv` records it)
 - [ ] Write the architecture/setup section of the documentation
 
 ### 5.3 Person C — SDN
@@ -326,10 +329,12 @@ The "Shared" row is deliberate — the rubric rewards integration and viva under
 - [x] `qos_controller.py` (static QoS): classification rules — match UDP by destination port → `SetQueue()` → output (using Person B's queue IDs, Section 1.5 mapping) — Phase 4.1
 - [x] Verify with `ovs-ofctl dump-flows s1` that rule packet-counters increase correctly
 - [x] Rerun the congestion experiment with priority active and compare against the saved baseline — Phase 4.2
-- [ ] `dynamic_controller.py`: periodic stats polling (`hub.sleep` loop) + live rule updates mid-experiment (e.g., shifting which flow is HIGH every 30 seconds) — Phase 4.3
+- [ ] `controller/dynamic_controller.py`: poll queue/port stats on s1 port 4 every 2 s (`hub.sleep` loop), log per-class rates
+- [ ] Define "overload" (e.g. total near 90% of 5 Mbit/s and drops rising), then change `SetQueue` rules live and revert when the load drops
+- [ ] Write every rule change to a policy log: `ts, flow_id, old_queue, new_queue, reason` (`time.monotonic_ns()` for `ts`)
 
 **D2 shared contribution**
-- [ ] Make the controller respond visibly to the challenging scenario (e.g., detect the spike and change rules)
+- [ ] Dynamic must visibly differ from static on the surge: rules change within a few seconds of t=10 s
 - [ ] Write the controller/SDN-logic section of the documentation
 
 ---
@@ -360,7 +365,7 @@ The "Shared" row is deliberate — the rubric rewards integration and viva under
 | Finish Phase 3.5 (baseline results) and remaining D1 shared items, submit | **D1 submitted (15 marks)** |
 | Phase 4.1: B sets up OVS queues; C builds classification rules; verify with `dump-flows` | Static half of Dynamic SDN Functionality done |
 | Phase 4.2-4.3: C adds dynamic stats polling + live rule updates; team designs and runs the challenging scenario together | Dynamic SDN Functionality + Challenging Scenario done |
-| Phase 5-6: run all five experiment types; A builds analysis, fairness index, and graphs | Performance Evaluation done |
+| Phase 5-6: run all four experiments; A builds analysis, fairness index, and graphs | Performance Evaluation done |
 |Everyone writes their section of the documentation, polish repo, rehearse viva together | **D2 submitted (25 marks)** |
 
 ---

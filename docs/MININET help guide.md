@@ -179,8 +179,6 @@ Expect `switch connected: dpid=1` and `dpid=2` once Mininet starts. Leave it run
 sudo python3 mininet/run_experiment.py congestion --mode remote --cap none --queues --run-id 186 --duration 30 --label static
 ```
 
-- **The bug**: rn there's a small bug bcz loses for all flows are 0% and the senders are a bit slow as the packets wait in the sender's socket buffer when the queues are full which also increases the latencies.(will fix next by making sender buffer big,and push the packets directly to the queues and drop them when full)
-
 - the mode must be `remote`,to control the switches in mininet by our controller.
 - cap must be `none` for the ovs queue creation else tclink will be used,also use the option `--queues`
 
@@ -192,6 +190,61 @@ sudo ovs-ofctl -O OpenFlow13 dump-flows s1
 - make sure u run it during the run,bcz all switches are virtual and cleaned up after the run.
 - this cmd shows the 4 qos rules(priority-10 rules) installed on s1 by the sdn controller,each ending in output:"s1-eth4"
 
+### Results (queue rates tuned)
+
+
+| Run | Rates (H/M/L/B) | HIGH loss | MEDIUM loss | LOW loss | BACKGROUND loss |
+|---|---|---|---|---|---|
+| 198-200 | 2 / 1.5 / 1 / 0.5 | 0% | about 12% | about 58% | about 84% |
+| 186 (tuned) | 1.3 / 2.3 / 0.8 / 0.6 | 0% | 0% | 73.1% | 79.4% |
+
+
+Only `static` and `dynamic` use these queues. `baseline` and `baseline_ryu` use the TCLink cap, so tuning does not affect them.
+
+
+---
+
+## 6. Experiment 4 - Dynamic QoS on the surge
+
+**Surge** = the challenging scenario: 
+- HIGH, MEDIUM and LOW start at t=0, then BACKGROUND joins at t=10 s (demand goes from about 6 to about 10 Mbit/s on a 5 Mbit/s link)
+- The test script knows this but the controller does not and must detect it from switch stats
+
+
+```bash
+#rn you can run this scenario with the help of qos(static) controller too,but loss for background flows would be too high)
+ryu-manager controller/qos_controller.py      
+# terminal 2:
+sudo python3 mininet/run_experiment.py surge --mode remote --cap none --queues --duration 30 --repeat 3 --label static
+```
+```bash
+# try this only after dynamic_controller is done
+# terminal 1: 
+ryu-manager controller/dynamic_controller.py      
+# terminal 2:
+sudo python3 mininet/run_experiment.py surge --mode remote --cap none --queues --duration 30 --repeat 3 --label dynamic
+```
+`--label static` also may work for this run(need to verigy after the controller is done)
+
+---
+
+## 7. Run all 4 experiments with one command
+
+```bash
+sudo python3 mininet/run_all.py                  # all 4, 3 repeats each, 30 s
+sudo python3 mininet/run_all.py --only static    # just this one
+sudo python3 mininet/run_all.py --dry-run        # print the commands only
+```
+
+| Experiment | Scenario | Controller | Label |
+|---|---|---|---|
+| baseline | no_congestion | none | `baseline` |
+| baseline_ryu | congestion | `baseline_controller.py` | `baseline_ryu` |
+| static | congestion | `qos_controller.py` | `static` |
+| dynamic | surge | `dynamic_controller.py` | `dynamic` |
+
+- A controller file that does not exist yet is skipped with a message, so it works before `dynamic_controller.py` is written.
+- `--only static_surge` runs the static policy on the surge (the reference for dynamic); it is not part of the default four.
 
 ---
 
