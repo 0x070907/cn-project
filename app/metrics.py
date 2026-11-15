@@ -8,6 +8,14 @@ import time
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import TypedDict
+
+try:
+    # Normal execution: receiver.py runs from app/ and imports protocol directly.
+    from protocol import data_header_size
+except ImportError:  # pragma: no cover - exercised when imported as app.metrics
+    # Test/package execution: the repository root is on sys.path.
+    from app.protocol import data_header_size
+
 # imp (fix this later when done with the full thingy):  currently we assume that the sender and receivers monotonic clocks share the same time base, it works for localhost setup but may not work for mininet  
 
 # results go in results/, one level above app/, no matter where the script is run from.
@@ -29,6 +37,7 @@ class SecondBucket(TypedDict):
 
     sequences: set[int]
     payload_bytes: int
+    received_bytes: int
     latencies_ns: list[int]
 
 # column order of metrics.csv: one row per flow per run
@@ -43,8 +52,10 @@ fields: list[str] = [
     "lost_packets",
     "packet_loss_pct",
     "payload_bytes",
+    "received_bytes",
     "duration_seconds",
     "goodput_mbps",
+    "throughput_mbps",
     "avg_latency_ms",
     "p50_latency_ms",
     "p95_latency_ms",
@@ -65,7 +76,9 @@ per_second_fields: list[str] = [
     "lost_packets",
     "packet_loss_pct",
     "payload_bytes",
+    "received_bytes",
     "goodput_mbps",
+    "throughput_mbps",
     "avg_latency_ms",
     "p95_latency_ms",
 ]
@@ -83,6 +96,14 @@ def percentile(values: Sequence[float], p: float) -> float | None:
     return values[index]
 
 
+def _mbps(byte_count: int, duration_seconds: float) -> float:
+    """Convert bytes over a duration to Mbps, using zero for no duration."""
+
+    if duration_seconds <= 0:
+        return 0.0
+    return byte_count * 8 / duration_seconds / 1_000_000
+
+
 def record_run(
     experiment_id: str,
     run_id: int,
@@ -94,6 +115,7 @@ def record_run(
     payload_bytes: int,
     duration_seconds: float,
     latencies_ns: Iterable[int],  # Iterable: it is only looped over once (the list comprehension below)
+    received_bytes: int | None = None,
 ) -> None:
     
     # only unique sequence numbers count as successfully received packets
@@ -105,11 +127,17 @@ def record_run(
     else:
         packet_loss_pct = 0.0
 
+    # Throughput counts complete application datagrams (QoS header + payload)
+    # for the unique packets that were delivered.  Duplicate datagrams and the
+    # UDP/IP headers added by the kernel are not included.  Older callers that
+    # do not supply received_bytes get the same value reconstructed from the
+    # known protocol header size.
+    if received_bytes is None:
+        received_bytes = payload_bytes + unique_received * data_header_size
+
     # goodput measures useful payload delivered per second (headers excluded, so it sits slightly below the sending rate)
-    if duration_seconds > 0:
-        goodput_mbps = payload_bytes * 8 / duration_seconds / 1_000_000
-    else:
-        goodput_mbps = 0.0
+    goodput_mbps = _mbps(payload_bytes, duration_seconds)
+    throughput_mbps = _mbps(received_bytes, duration_seconds)
 
     # we convert latency samples from nanoseconds to milliseconds
     latencies_ms = [
@@ -129,8 +157,10 @@ def record_run(
         "lost_packets": lost_packets,
         "packet_loss_pct": round(packet_loss_pct, 4),
         "payload_bytes": payload_bytes,
+        "received_bytes": received_bytes,
         "duration_seconds": round(duration_seconds, 6),
         "goodput_mbps": round(goodput_mbps, 6),
+        "throughput_mbps": round(throughput_mbps, 6),
         "avg_latency_ms": (
             round(statistics.mean(latencies_ms), 6)
             if latencies_ms else ""
@@ -204,7 +234,12 @@ def record_per_second(
 
         bucket = buckets.get(
             second,
-            {"sequences": set(), "payload_bytes": 0, "latencies_ns": []},
+            {
+                "sequences": set(),
+                "payload_bytes": 0,
+                "received_bytes": 0,
+                "latencies_ns": [],
+            },
         )
         unique_received = len(bucket["sequences"])
         expected_this_second = max(
@@ -218,7 +253,11 @@ def record_per_second(
             packet_loss_pct = 0.0
 
         payload_bytes = bucket["payload_bytes"]
-        goodput_mbps = payload_bytes * 8 / bucket_seconds / 1_000_000
+        received_bytes = bucket.get("received_bytes")
+        if received_bytes is None:
+            received_bytes = payload_bytes + unique_received * data_header_size
+        goodput_mbps = _mbps(payload_bytes, bucket_seconds)
+        throughput_mbps = _mbps(received_bytes, bucket_seconds)
 
         latencies_ms = [
             latency / 1_000_000
@@ -238,7 +277,9 @@ def record_per_second(
                 "lost_packets": lost_packets,
                 "packet_loss_pct": round(packet_loss_pct, 4),
                 "payload_bytes": payload_bytes,
+                "received_bytes": received_bytes,
                 "goodput_mbps": round(goodput_mbps, 6),
+                "throughput_mbps": round(throughput_mbps, 6),
                 "avg_latency_ms": (
                     round(statistics.mean(latencies_ms), 6)
                     if latencies_ms else ""

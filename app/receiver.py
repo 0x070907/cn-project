@@ -26,6 +26,7 @@ class RunState(TypedDict):
     ended_at: float | None     # None until the end message arrives (time.monotonic(), in seconds)
     ended_at_ns: int | None    # same moment as ended_at but in nanoseconds
     payload_bytes: int         # total payload received (header excluded) -> used for goodput
+    received_bytes: int        # complete data datagrams received (header + payload) -> used for throughput
     latencies_ns: list[int]    # one latency sample per unique packet
     duplicates: int
     out_of_order: int
@@ -121,6 +122,7 @@ def main() -> None:
                                 "ended_at": None,
                                 "ended_at_ns": None,
                                 "payload_bytes": 0,
+                                "received_bytes": 0,
                                 "latencies_ns": [],
                                 "duplicates": 0,
                                 "out_of_order": 0,
@@ -223,6 +225,10 @@ def main() -> None:
                 )
 
                 run["payload_bytes"] += len(payload)
+                # Throughput uses the complete application datagram returned by
+                # recvfrom: the QoS header plus payload.  The UDP/IP headers are
+                # added by the kernel and are not part of this byte count.
+                run["received_bytes"] += len(packet)
                 run["latencies_ns"].append(latency_ns)  # this records the timestamp before packet parsing & other receiver processing
                 # (valid because sender and receiver share one clock, which holds on localhost and inside mininet)
 
@@ -232,10 +238,16 @@ def main() -> None:
                 second = max(0, (recv_ts_ns - run["started_at"]) // 1_000_000_000)
                 bucket = run["second_buckets"].setdefault(
                     second,
-                    {"sequences": set(), "payload_bytes": 0, "latencies_ns": []},
+                    {
+                        "sequences": set(),
+                        "payload_bytes": 0,
+                        "received_bytes": 0,
+                        "latencies_ns": [],
+                    },
                 )
                 bucket["sequences"].add(sequence_number)
                 bucket["payload_bytes"] += len(payload)
+                bucket["received_bytes"] += len(packet)
                 bucket["latencies_ns"].append(latency_ns)
 
                 last_sequence[flow_id] = max(last_sequence[flow_id], sequence_number)
@@ -297,6 +309,7 @@ def main() -> None:
                         payload_bytes=run["payload_bytes"],
                         duration_seconds=duration_seconds,
                         latencies_ns=run["latencies_ns"],
+                        received_bytes=run["received_bytes"],
                     )
 
                     metrics.record_per_second(
