@@ -16,6 +16,7 @@ from analysis.schema import (
     CANONICAL_EXPERIMENTS,
     EXPECTED_FLOWS,
     FAIRNESS_FIELDS,
+    LEGACY_METRICS_FIELDS,
     MANIFEST_FIELDS,
     METRICS_FIELDS,
     PER_SECOND_FIELDS,
@@ -34,7 +35,9 @@ FLOW_SPECS = {
 
 def metric_row(run_id: int, flow: str) -> dict[str, str | int | float]:
     expected = 100
-    payload = expected * (FLOW_SPECS[flow][0] - 28)
+    packet_bytes = FLOW_SPECS[flow][0]
+    payload = expected * (packet_bytes - 28)
+    received = expected * packet_bytes
     return {
         "experiment_id": run_id,
         "run_id": run_id,
@@ -46,8 +49,10 @@ def metric_row(run_id: int, flow: str) -> dict[str, str | int | float]:
         "lost_packets": 0,
         "packet_loss_pct": 0.0,
         "payload_bytes": payload,
+        "received_bytes": received,
         "duration_seconds": 1.0,
         "goodput_mbps": round(payload * 8 / 1_000_000, 6),
+        "throughput_mbps": round(received * 8 / 1_000_000, 6),
         "avg_latency_ms": 0.1,
         "p50_latency_ms": 0.1,
         "p95_latency_ms": 0.2,
@@ -67,7 +72,9 @@ def per_second_row(run_id: int, flow: str) -> dict[str, str | int | float]:
         "lost_packets": row["lost_packets"],
         "packet_loss_pct": row["packet_loss_pct"],
         "payload_bytes": row["payload_bytes"],
+        "received_bytes": row["received_bytes"],
         "goodput_mbps": row["goodput_mbps"],
+        "throughput_mbps": row["throughput_mbps"],
         "avg_latency_ms": row["avg_latency_ms"],
         "p95_latency_ms": row["p95_latency_ms"],
     }
@@ -262,6 +269,53 @@ class ValidationTests(unittest.TestCase):
             report = validate_all(results, experiments, final=True)
             self.assertTrue(
                 any(issue.code == "final_too_few_runs" for issue in report.errors),
+                report.render(),
+            )
+
+    def test_legacy_metrics_without_throughput_are_readable_but_fail_final(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            results, experiments = build_layout(Path(temporary))
+            metrics_path = results / "metrics.csv"
+            with metrics_path.open(newline="") as handle:
+                rows = list(csv.DictReader(handle))
+
+            write_csv(
+                metrics_path,
+                LEGACY_METRICS_FIELDS,
+                [
+                    {name: row[name] for name in LEGACY_METRICS_FIELDS}
+                    for row in rows
+                ],
+            )
+
+            default_report = validate_all(results, experiments, strict=False, final=False)
+            self.assertEqual(default_report.errors, [], default_report.render())
+
+            final_report = validate_all(results, experiments, strict=True, final=True)
+            self.assertTrue(
+                any(
+                    issue.code == "missing_columns" and issue.path == metrics_path
+                    for issue in final_report.errors
+                ),
+                final_report.render(),
+            )
+
+    def test_throughput_mismatch_is_an_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            results, experiments = build_layout(Path(temporary))
+            metrics_path = results / "metrics.csv"
+            with metrics_path.open(newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            rows[0]["throughput_mbps"] = str(float(rows[0]["throughput_mbps"]) + 1.0)
+            write_csv(metrics_path, METRICS_FIELDS, rows)
+
+            report = validate_all(results, experiments, final=True)
+            self.assertTrue(
+                any(
+                    issue.code == "throughput_mismatch"
+                    and issue.path == metrics_path
+                    for issue in report.errors
+                ),
                 report.render(),
             )
 

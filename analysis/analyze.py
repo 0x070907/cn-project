@@ -27,6 +27,7 @@ from analysis.aggregate import (  # noqa: E402
     FLOW_TABLE_FIELDS,
     aggregate_fairness,
     aggregate_flow_medians,
+    canonical_rows,
     comparison_rows,
     fairness_per_run,
     render_fairness_table,
@@ -45,7 +46,11 @@ from analysis.plots import (  # noqa: E402
     plot_surge_figures,
     plot_surge_reference,
 )
-from analysis.schema import COMPARISON_EXPERIMENTS, REPO_ROOT  # noqa: E402
+from analysis.schema import (  # noqa: E402
+    CANONICAL_EXPERIMENTS,
+    COMPARISON_EXPERIMENTS,
+    REPO_ROOT,
+)
 from analysis.validate import validate_all  # noqa: E402
 
 
@@ -161,6 +166,37 @@ def run_pipeline(args: argparse.Namespace) -> int:
                 except NoPlotData as error:
                     skipped.append(str(error))
 
+        # Throughput is compared across all five reportable pairs, including
+        # the static-surge reference used by the dynamic experiment.
+        throughput_rows = canonical_rows(flow_rows)
+        throughput_found = {
+            str(row["experiment"]) for row in throughput_rows
+        }
+        throughput_missing = [
+            name for name in CANONICAL_EXPERIMENTS if name not in throughput_found
+        ]
+        if throughput_missing:
+            skipped.append(
+                "throughput comparison needs all five reportable pairs; missing: "
+                + ", ".join(throughput_missing)
+            )
+        if throughput_rows:
+            try:
+                figures.append(
+                    plot_comparison(
+                        throughput_rows,
+                        figures_dir,
+                        metric="throughput_mbps",
+                        title=(
+                            "Throughput comparison — all five canonical experiments "
+                            "(median of latest three runs)"
+                        ),
+                        experiments=tuple(CANONICAL_EXPERIMENTS),
+                    )
+                )
+            except NoPlotData as error:
+                skipped.append(str(error))
+
         surge_rows = [
             row for row in flow_rows
             if row["experiment"] in {"static_surge", "dynamic"}
@@ -199,7 +235,12 @@ def run_pipeline(args: argparse.Namespace) -> int:
                 practice_experiments = sorted(
                     {str(row["experiment"]) for row in practice_rows}
                 )
-                for metric in ("goodput_mbps", "packet_loss_pct", "p95_latency_ms"):
+                for metric in (
+                    "goodput_mbps",
+                    "throughput_mbps",
+                    "packet_loss_pct",
+                    "p95_latency_ms",
+                ):
                     try:
                         figures.append(
                             plot_comparison(

@@ -50,6 +50,15 @@ class AggregationTests(unittest.TestCase):
             self.assertEqual(dynamic_high["run_ids"], "2110 2111 2112")
             self.assertAlmostEqual(dynamic_high["packet_loss_pct_median"], 0.0)
             self.assertIsNotNone(dynamic_high["goodput_mbps_median"])
+            self.assertAlmostEqual(
+                dynamic_high["throughput_mbps_median"],
+                0.16,
+                places=6,
+            )
+            self.assertGreater(
+                dynamic_high["throughput_mbps_median"],
+                dynamic_high["goodput_mbps_median"],
+            )
 
             # The no-congestion baseline only promises two flows.
             self.assertIn(("baseline", "high"), by_key)

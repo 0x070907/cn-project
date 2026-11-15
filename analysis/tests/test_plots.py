@@ -7,7 +7,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from analysis.aggregate import aggregate_flow_medians, comparison_rows
+from analysis.aggregate import (
+    aggregate_flow_medians,
+    canonical_rows,
+    comparison_rows,
+)
 from analysis.loader import load_dataset
 from analysis.plots import (
     estimate_start_ns,
@@ -15,11 +19,13 @@ from analysis.plots import (
     median_timeline_rows,
     plot_comparison,
     plot_surge_figures,
+    plot_surge_reference,
     plot_surge_timeline,
     policy_offsets,
     surge_run_inputs,
 )
 from analysis.schema import (
+    CANONICAL_EXPERIMENTS,
     EVENT_FIELDS,
     EXPECTED_FLOWS,
     PER_SECOND_FIELDS,
@@ -79,6 +85,27 @@ class PlotTests(unittest.TestCase):
         path = plot_comparison(rows, self.root / "figures", metric="goodput_mbps")
         self.assertTrue(path.exists())
         self.assertGreater(path.stat().st_size, 1000)
+
+    def test_throughput_figures_cover_all_canonical_pairs(self) -> None:
+        rows = canonical_rows(aggregate_flow_medians(self.dataset))
+        self.assertEqual(
+            {row["experiment"] for row in rows},
+            set(CANONICAL_EXPERIMENTS),
+        )
+        path = plot_comparison(
+            rows,
+            self.root / "figures",
+            metric="throughput_mbps",
+            experiments=tuple(CANONICAL_EXPERIMENTS),
+        )
+        self.assertTrue(path.exists())
+        self.assertGreater(path.stat().st_size, 1000)
+
+        surge_paths = plot_surge_reference(rows, self.root / "surge-figures")
+        self.assertIn(
+            "surge_throughput.png",
+            {surge_path.name for surge_path in surge_paths},
+        )
 
     def test_event_start_is_recovered_from_delayed_join(self) -> None:
         events = [
@@ -142,6 +169,7 @@ class PlotTests(unittest.TestCase):
         median_rows = median_timeline_rows(self.dataset.per_second, [2110, 2111, 2112])
         self.assertTrue(median_rows)
         self.assertEqual({row["run_id"] for row in median_rows}, {0})
+        self.assertTrue(all(row["throughput_mbps"] is not None for row in median_rows))
         median_path = plot_surge_timeline(median_rows, self.root / "figures" / "median.png")
         self.assertTrue(median_path.exists())
 

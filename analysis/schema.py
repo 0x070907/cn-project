@@ -23,8 +23,38 @@ EXPECTED_FLOWS: dict[str, tuple[str, ...]] = {
     "surge": FLOWS,
 }
 
+# The 28-byte application header from app/protocol.py (format "!IQQq").
+# Throughput counts this header plus payload; goodput counts payload only.
+DATA_HEADER_BYTES = 28
+
+# Files written before the throughput split do not have these two columns.
+# They remain readable for practice/legacy data, but the final gate requires
+# them in every selected run.
+THROUGHPUT_FIELDS: tuple[str, ...] = ("received_bytes", "throughput_mbps")
+
 # One row per flow per run.  Keep this identical to app/metrics.py:fields.
 METRICS_FIELDS: tuple[str, ...] = (
+    "experiment_id",
+    "run_id",
+    "flow",
+    "expected_packets",
+    "unique_received",
+    "duplicates",
+    "out_of_order",
+    "lost_packets",
+    "packet_loss_pct",
+    "payload_bytes",
+    "received_bytes",
+    "duration_seconds",
+    "goodput_mbps",
+    "throughput_mbps",
+    "avg_latency_ms",
+    "p50_latency_ms",
+    "p95_latency_ms",
+)
+
+# Header written by the pre-throughput receiver.
+LEGACY_METRICS_FIELDS: tuple[str, ...] = (
     "experiment_id",
     "run_id",
     "flow",
@@ -57,9 +87,28 @@ MANIFEST_FIELDS: tuple[str, ...] = ("run_id", "scenario", "mode", "duration_s")
 
 # experiments/<label>/summary.csv = scenario + mode + the metrics columns.
 SUMMARY_FIELDS: tuple[str, ...] = ("scenario", "mode") + METRICS_FIELDS
+LEGACY_SUMMARY_FIELDS: tuple[str, ...] = ("scenario", "mode") + LEGACY_METRICS_FIELDS
 
 # Written by app/receiver.py through app/metrics.py after this change.
 PER_SECOND_FIELDS: tuple[str, ...] = (
+    "experiment_id",
+    "run_id",
+    "flow",
+    "second",
+    "bucket_seconds",
+    "expected_packets",
+    "unique_received",
+    "lost_packets",
+    "packet_loss_pct",
+    "payload_bytes",
+    "received_bytes",
+    "goodput_mbps",
+    "throughput_mbps",
+    "avg_latency_ms",
+    "p95_latency_ms",
+)
+
+LEGACY_PER_SECOND_FIELDS: tuple[str, ...] = (
     "experiment_id",
     "run_id",
     "flow",

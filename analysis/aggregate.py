@@ -24,6 +24,7 @@ CANONICAL_ORDER: dict[str, int] = {
 
 FLOW_METRICS: tuple[str, ...] = (
     "goodput_mbps",
+    "throughput_mbps",
     "packet_loss_pct",
     "avg_latency_ms",
     "p95_latency_ms",
@@ -36,6 +37,7 @@ FLOW_TABLE_FIELDS: tuple[str, ...] = (
     "n_runs",
     "run_ids",
     "goodput_mbps_median",
+    "throughput_mbps_median",
     "packet_loss_pct_median",
     "avg_latency_ms_median",
     "p95_latency_ms_median",
@@ -121,6 +123,9 @@ def aggregate_flow_medians(
                     "goodput_mbps_median": _median(
                         _metric(row, "goodput_mbps") for _run_id, row in entries
                     ),
+                    "throughput_mbps_median": _median(
+                        _metric(row, "throughput_mbps") for _run_id, row in entries
+                    ),
                     "packet_loss_pct_median": _median(
                         _metric(row, "packet_loss_pct") for _run_id, row in entries
                     ),
@@ -146,6 +151,7 @@ def aggregate_flow_medians(
                     "n_runs": 0,
                     "run_ids": " ".join(str(run_id) for run_id in run_ids),
                     "goodput_mbps_median": None,
+                    "throughput_mbps_median": None,
                     "packet_loss_pct_median": None,
                     "avg_latency_ms_median": None,
                     "p95_latency_ms_median": None,
@@ -276,16 +282,17 @@ def _format(value: Any, digits: int = 3) -> str:
 
 def render_flow_table(rows: list[dict[str, Any]]) -> str:
     lines = [
-        "| Experiment | Flow | Runs | Goodput (Mbps) | Loss (%) | Avg latency (ms) | p95 latency (ms) |",
-        "|---|---|---:|---:|---:|---:|---:|",
+        "| Experiment | Flow | Runs | Goodput (Mbps) | Throughput (Mbps) | Loss (%) | Avg latency (ms) | p95 latency (ms) |",
+        "|---|---|---:|---:|---:|---:|---:|---:|",
     ]
     for row in rows:
         lines.append(
-            "| {experiment} | {flow} | {n_runs} | {goodput} | {loss} | {avg} | {p95} |".format(
+            "| {experiment} | {flow} | {n_runs} | {goodput} | {throughput} | {loss} | {avg} | {p95} |".format(
                 experiment=row["experiment"],
                 flow=row["flow"],
                 n_runs=row["n_runs"],
                 goodput=_format(row["goodput_mbps_median"]),
+                throughput=_format(row["throughput_mbps_median"]),
                 loss=_format(row["packet_loss_pct_median"]),
                 avg=_format(row["avg_latency_ms_median"]),
                 p95=_format(row["p95_latency_ms_median"]),
@@ -330,12 +337,23 @@ def comparison_rows(flow_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     )
 
 
+def canonical_rows(flow_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """All five reportable experiments, in canonical report order."""
+
+    order = {name: index for index, name in enumerate(CANONICAL_EXPERIMENTS)}
+    return sorted(
+        (row for row in flow_rows if row["experiment"] in order),
+        key=lambda row: (order[row["experiment"]], row["flow"]),
+    )
+
+
 __all__ = [
     "FAIRNESS_RUN_FIELDS",
     "FAIRNESS_TABLE_FIELDS",
     "FLOW_TABLE_FIELDS",
     "aggregate_fairness",
     "aggregate_flow_medians",
+    "canonical_rows",
     "comparison_rows",
     "fairness_per_run",
     "jains_index",

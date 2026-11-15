@@ -30,10 +30,14 @@ if __package__ in (None, ""):
 from analysis.loader import load_summary_rows  # noqa: E402
 from analysis.schema import (  # noqa: E402
     CANONICAL_EXPERIMENTS,
+    DATA_HEADER_BYTES,
     FAIRNESS_FIELDS,
     FLOWS,
     KNOWN_MANIFEST_MODES,
     KNOWN_MANIFEST_SCENARIOS,
+    LEGACY_METRICS_FIELDS,
+    LEGACY_PER_SECOND_FIELDS,
+    LEGACY_SUMMARY_FIELDS,
     MANIFEST_FIELDS,
     METRICS_FIELDS,
     PER_SECOND_FIELDS,
@@ -157,8 +161,15 @@ def _read_csv(
     path: Path,
     required_fields: tuple[str, ...],
     label: str,
+    *,
+    allowed_fields: tuple[str, ...] | None = None,
 ) -> list[tuple[int, dict[str, str]]] | None:
-    """Read a CSV, check its header, and return (line number, row) pairs."""
+    """Read a CSV, check its header, and return (line number, row) pairs.
+
+    ``required_fields`` is the minimum schema (legacy files can omit the
+    throughput columns during non-final validation).  ``allowed_fields`` is the
+    full current schema, so legitimate new columns are not reported as extra.
+    """
 
     if not path.exists():
         report.error("missing_file", path, None, f"{label} file does not exist")
@@ -182,7 +193,8 @@ def _read_csv(
             )
             return None
 
-        unexpected = [name for name in header if name not in required_fields]
+        allowed = allowed_fields or required_fields
+        unexpected = [name for name in header if name not in allowed]
         if unexpected:
             report.warning(
                 "extra_columns",
@@ -191,7 +203,8 @@ def _read_csv(
                 f"unexpected column(s): {', '.join(unexpected)}",
             )
 
-        if header[: len(required_fields)] != required_fields:
+        present_required = tuple(name for name in header if name in required_fields)
+        if present_required != required_fields:
             report.warning(
                 "column_order",
                 path,
@@ -274,6 +287,7 @@ def _check_metric_row(
     row: dict[str, str],
     *,
     check_experiment_id: bool = True,
+    require_throughput: bool = False,
 ) -> tuple[int | None, str | None] | None:
     """Validate one metrics-shaped row (metrics.csv or summary.csv)."""
 
@@ -303,9 +317,25 @@ def _check_metric_row(
     lost = _parse_int(report, path, line, row, "lost_packets")
     payload = _parse_int(report, path, line, row, "payload_bytes")
 
+    received_raw = row.get("received_bytes", "")
+    if received_raw in ("", None):
+        received = None
+        if require_throughput:
+            report.error("missing_value", path, line, "received_bytes is empty")
+    else:
+        received = _parse_int(report, path, line, row, "received_bytes")
+
     loss_pct = _parse_float(report, path, line, row, "packet_loss_pct")
     duration = _parse_float(report, path, line, row, "duration_seconds")
     goodput = _parse_float(report, path, line, row, "goodput_mbps")
+    throughput = _parse_float(
+        report,
+        path,
+        line,
+        row,
+        "throughput_mbps",
+        required=require_throughput,
+    )
     avg_latency = _parse_float(
         report, path, line, row, "avg_latency_ms", required=False
     )
@@ -352,6 +382,30 @@ def _check_metric_row(
                 f"goodput_mbps={goodput} but payload*8/duration={wanted_goodput:.6f}",
             )
 
+    if received is not None and payload is not None and unique is not None:
+        wanted_received = payload + unique * DATA_HEADER_BYTES
+        if received != wanted_received:
+            report.error(
+                "received_bytes_mismatch",
+                path,
+                line,
+                f"received_bytes={received} but payload_bytes + "
+                f"{DATA_HEADER_BYTES}*unique_received={wanted_received}",
+            )
+
+    if received is not None and duration is not None and throughput is not None:
+        wanted_throughput = (
+            received * 8 / duration / 1_000_000 if duration > 0 else 0.0
+        )
+        if abs(throughput - wanted_throughput) > 0.01:
+            report.error(
+                "throughput_mismatch",
+                path,
+                line,
+                f"throughput_mbps={throughput} but "
+                f"received*8/duration={wanted_throughput:.6f}",
+            )
+
     if unique is not None and unique > 0:
         if avg_latency is None:
             report.warning(
@@ -391,10 +445,18 @@ def validate_metrics(
     path: Path,
     *,
     run_ids: set[int] | None = None,
+    require_throughput: bool = False,
 ) -> dict[tuple[int, str], list[int]]:
     """Validate results/metrics.csv and return row locations by (run, flow)."""
 
-    rows = _read_csv(report, path, METRICS_FIELDS, "metrics.csv")
+    required = METRICS_FIELDS if require_throughput else LEGACY_METRICS_FIELDS
+    rows = _read_csv(
+        report,
+        path,
+        required,
+        "metrics.csv",
+        allowed_fields=METRICS_FIELDS,
+    )
     locations: dict[tuple[int, str], list[int]] = {}
     if rows is None:
         return locations
@@ -402,7 +464,13 @@ def validate_metrics(
     for line, row in rows:
         if run_ids is not None and _integer_or_none(row.get("run_id")) not in run_ids:
             continue
-        key = _check_metric_row(report, path, line, row)
+        key = _check_metric_row(
+            report,
+            path,
+            line,
+            row,
+            require_throughput=require_throughput,
+        )
         if key is None:
             continue
         locations.setdefault(key, []).append(line)
@@ -563,10 +631,18 @@ def validate_summary(
     *,
     run_ids: set[int] | None = None,
     pairs: frozenset[tuple[str, str]] | None = None,
+    require_throughput: bool = False,
 ) -> list[dict[str, str]]:
     """Validate one experiments/<label>/summary.csv and return its rows."""
 
-    rows = _read_csv(report, path, SUMMARY_FIELDS, f"summary:{folder}")
+    required = SUMMARY_FIELDS if require_throughput else LEGACY_SUMMARY_FIELDS
+    rows = _read_csv(
+        report,
+        path,
+        required,
+        f"summary:{folder}",
+        allowed_fields=SUMMARY_FIELDS,
+    )
     if rows is None:
         return []
 
@@ -586,7 +662,14 @@ def validate_summary(
         if mode not in KNOWN_MANIFEST_MODES:
             report.error("unknown_mode", path, line, f"mode={mode!r}")
 
-        key = _check_metric_row(report, path, line, row, check_experiment_id=True)
+        key = _check_metric_row(
+            report,
+            path,
+            line,
+            row,
+            check_experiment_id=True,
+            require_throughput=require_throughput,
+        )
         if key is not None:
             seen.setdefault(key, []).append(line)
             run_scenarios.setdefault(key[0], set()).add(scenario)
@@ -660,8 +743,18 @@ def validate_per_second(
     path: Path,
     *,
     run_ids: set[int] | None = None,
+    require_throughput: bool = False,
 ) -> dict[tuple[int, str], list[int]]:
-    rows = _read_csv(report, path, PER_SECOND_FIELDS, "per_second.csv")
+    required = (
+        PER_SECOND_FIELDS if require_throughput else LEGACY_PER_SECOND_FIELDS
+    )
+    rows = _read_csv(
+        report,
+        path,
+        required,
+        "per_second.csv",
+        allowed_fields=PER_SECOND_FIELDS,
+    )
     locations: dict[tuple[int, str], list[int]] = {}
     if rows is None:
         return locations
@@ -690,7 +783,22 @@ def validate_per_second(
         lost = _parse_int(report, path, line, row, "lost_packets")
         loss_pct = _parse_float(report, path, line, row, "packet_loss_pct")
         payload = _parse_int(report, path, line, row, "payload_bytes")
+        received_raw = row.get("received_bytes", "")
+        if received_raw in ("", None):
+            received = None
+            if require_throughput:
+                report.error("missing_value", path, line, "received_bytes is empty")
+        else:
+            received = _parse_int(report, path, line, row, "received_bytes")
         goodput = _parse_float(report, path, line, row, "goodput_mbps")
+        throughput = _parse_float(
+            report,
+            path,
+            line,
+            row,
+            "throughput_mbps",
+            required=require_throughput,
+        )
         avg_latency = _parse_float(
             report, path, line, row, "avg_latency_ms", required=False
         )
@@ -753,6 +861,31 @@ def validate_per_second(
                     line,
                     f"goodput_mbps={goodput} but "
                     f"payload*8/bucket_seconds={wanted_goodput:.6f}",
+                )
+        if received is not None and payload is not None and unique is not None:
+            wanted_received = payload + unique * DATA_HEADER_BYTES
+            if received != wanted_received:
+                report.error(
+                    "received_bytes_mismatch",
+                    path,
+                    line,
+                    f"received_bytes={received} but payload_bytes + "
+                    f"{DATA_HEADER_BYTES}*unique_received={wanted_received}",
+                )
+        if (
+            received is not None
+            and throughput is not None
+            and bucket_seconds is not None
+            and bucket_seconds > 0
+        ):
+            wanted_throughput = received * 8 / bucket_seconds / 1_000_000
+            if abs(throughput - wanted_throughput) > 0.001:
+                report.error(
+                    "throughput_mismatch",
+                    path,
+                    line,
+                    f"throughput_mbps={throughput} but "
+                    f"received*8/bucket_seconds={wanted_throughput:.6f}",
                 )
         if unique == 0 and any(value is not None for value in (avg_latency, p95)):
             report.warning(
@@ -975,13 +1108,26 @@ def validate_all(
             for run_id in run_ids
         }
 
-    metrics_rows = validate_metrics(report, metrics_path, run_ids=allowed_run_ids)
+    # With no selected final runs there is nothing whose throughput columns can
+    # be checked.  Keep legacy practice files out of the final error list; the
+    # missing-experiment errors are the actionable problem in that situation.
+    require_throughput = final and bool(allowed_run_ids)
+
+    metrics_rows = validate_metrics(
+        report,
+        metrics_path,
+        run_ids=allowed_run_ids,
+        require_throughput=require_throughput,
+    )
     fairness_rows = validate_fairness(report, fairness_path, run_ids=allowed_run_ids)
     manifest_rows = validate_manifest(report, manifest_path, run_ids=allowed_run_ids)
 
     if per_second_path.exists():
         per_second_locations = validate_per_second(
-            report, per_second_path, run_ids=allowed_run_ids
+            report,
+            per_second_path,
+            run_ids=allowed_run_ids,
+            require_throughput=require_throughput,
         )
         per_second_runs = {run_id for run_id, _flow in per_second_locations}
         per_second_present = True
@@ -1021,6 +1167,7 @@ def validate_all(
             metrics_rows,
             run_ids=allowed_run_ids,
             pairs=REPORTABLE_PAIRS if final else None,
+            require_throughput=require_throughput,
         )
         for entry in entries:
             entry["source"] = str(summary_path)

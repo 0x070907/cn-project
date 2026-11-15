@@ -85,6 +85,32 @@ class AnalyzeSelectionTests(unittest.TestCase):
             self.assertEqual(baseline["high"]["run_ids"], "2101 2102 2103")
             self.assertNotIn("test/no_congestion", {row["experiment"] for row in rows})
 
+    def test_final_pipeline_writes_throughput_column_and_figure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            results, experiments = build_layout(root)
+            output = root / "throughput-output"
+
+            status = run_pipeline(
+                pipeline_args(
+                    results,
+                    experiments,
+                    output,
+                    strict=True,
+                    final=True,
+                    skip_plots=False,
+                )
+            )
+            self.assertEqual(status, 0)
+
+            with (output / "tables" / "per_flow_medians.csv").open(newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertIn("throughput_mbps_median", rows[0])
+            self.assertTrue(
+                all(float(row["throughput_mbps_median"]) > 0 for row in rows)
+            )
+            self.assertTrue((output / "figures" / "comparison_throughput.png").exists())
+
     def test_practice_view_is_separate_from_the_final_tables(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -116,6 +142,14 @@ class AnalyzeSelectionTests(unittest.TestCase):
             practice_tables = (output / "practice_tables.md").read_text()
             self.assertNotIn("test/no_congestion", results_tables)
             self.assertIn("test/no_congestion", practice_tables)
+            self.assertTrue(
+                (
+                    output
+                    / "figures"
+                    / "practice"
+                    / "practice_throughput_mbps.png"
+                ).exists()
+            )
 
 
 if __name__ == "__main__":

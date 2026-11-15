@@ -51,6 +51,7 @@ EXPERIMENT_COLORS = {
 
 METRIC_LABELS = {
     "goodput_mbps": ("Goodput (Mbps)", "comparison_goodput.png"),
+    "throughput_mbps": ("Throughput (Mbps)", "comparison_throughput.png"),
     "packet_loss_pct": ("Packet loss (%)", "comparison_loss.png"),
     "p95_latency_ms": ("p95 latency (ms)", "comparison_p95_latency.png"),
     "avg_latency_ms": ("Average latency (ms)", "comparison_avg_latency.png"),
@@ -275,7 +276,7 @@ def plot_surge_timeline(
     title: str = "Dynamic surge timeline",
     run_id: int | None = None,
 ) -> Path:
-    """Three stacked per-second panels: goodput, loss, p95 latency."""
+    """Four stacked per-second panels: throughput, goodput, loss, p95 latency."""
 
     rows = [
         row for row in per_second_rows
@@ -295,8 +296,9 @@ def plot_surge_timeline(
     event_lines = event_offsets(events, start_ns)
     policy_lines = policy_offsets(policy, start_ns)
 
-    figure, axes = plt.subplots(3, 1, figsize=(12, 9), sharex=True)
+    figure, axes = plt.subplots(4, 1, figsize=(12, 11), sharex=True)
     panels = (
+        ("throughput_mbps", "Throughput (Mbps)"),
         ("goodput_mbps", "Goodput (Mbps)"),
         ("packet_loss_pct", "Packet loss (%)"),
         ("p95_latency_ms", "p95 latency (ms)"),
@@ -382,7 +384,9 @@ def median_timeline_rows(
                 "lost_packets": _median_float(row.get("lost_packets") for row in rows),
                 "packet_loss_pct": _median_float(row.get("packet_loss_pct") for row in rows),
                 "payload_bytes": _median_float(row.get("payload_bytes") for row in rows),
+                "received_bytes": _median_float(row.get("received_bytes") for row in rows),
                 "goodput_mbps": _median_float(row.get("goodput_mbps") for row in rows),
+                "throughput_mbps": _median_float(row.get("throughput_mbps") for row in rows),
                 "avg_latency_ms": _median_float(row.get("avg_latency_ms") for row in rows),
                 "p95_latency_ms": _median_float(row.get("p95_latency_ms") for row in rows),
             }
@@ -501,7 +505,12 @@ def plot_surge_reference(
     if not rows:
         raise NoPlotData("no static_surge or dynamic rows for the surge reference")
     paths: list[Path] = []
-    for metric in ("goodput_mbps", "packet_loss_pct", "p95_latency_ms"):
+    for metric in (
+        "goodput_mbps",
+        "throughput_mbps",
+        "packet_loss_pct",
+        "p95_latency_ms",
+    ):
         ylabel, default_filename = METRIC_LABELS[metric]
         paths.append(
             plot_comparison(
