@@ -18,21 +18,29 @@ import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
 from typing import IO, TYPE_CHECKING
-
-# let Python find topology.py, which sits in the same folder as this file
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from mininet.log import setLogLevel      # noqa: E402
-from topology import build, setup_queues   # noqa: E402
-
-if TYPE_CHECKING:
-    from mininet.net import Mininet     # only needed for type hints
 
 # settings: where things are, and what each flow looks like
 # __file__ = this script. dirname once = mininet/ folder, twice = repo root( cn-project/)
 REPO: str = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP: str = os.path.join(REPO, "app")                  # sender.py and receiver.py live here
+
+# let Python find topology.py (same folder) and the shared app schema helpers
+MININET_DIR: str = os.path.dirname(os.path.abspath(__file__))
+if MININET_DIR not in sys.path:
+    sys.path.insert(0, MININET_DIR)
+if REPO not in sys.path:
+    sys.path.insert(0, REPO)
+
+from mininet.log import setLogLevel      # noqa: E402
+from topology import build, setup_queues   # noqa: E402
+from app import metrics as app_metrics      # noqa: E402
+from app.summary import append_summary_rows  # noqa: E402
+
+if TYPE_CHECKING:
+    from mininet.net import Mininet     # only needed for type hints
+
 RESULTS: str = os.path.join(REPO, "results")          # same folder metrics.py writes to
 EXPERIMENTS: str = os.path.join(REPO, "experiments")  # results we choose to commit
 RECEIVER_IP: str = "10.0.0.4"
@@ -183,10 +191,10 @@ def rows_for_run(run_id: int) -> list[dict[str, str]]:
 
     path = os.path.join(RESULTS, "metrics.csv")
 
-    if not os.path.exists(path):
-        return []
-    with open(path, newline="") as f:
-        return [r for r in csv.DictReader(f) if r["run_id"] == str(run_id)]
+    # read_metrics_rows migrates a legacy header before parsing, so a current
+    # 17-column row can never be interpreted through an old 15-column header.
+    rows = app_metrics.read_metrics_rows(Path(path))
+    return [r for r in rows if r.get("run_id") == str(run_id)]
 
 
 def print_rows(rows: list[dict[str, str]]) -> None:
@@ -211,17 +219,8 @@ def append_summary(label: str,
         return
 
     out_dir = os.path.join(EXPERIMENTS, label)
-    os.makedirs(out_dir, exist_ok=True)
-    path = os.path.join(out_dir, "summary.csv")
-    is_new = not os.path.exists(path)
-    fields : list[str] = ["scenario", "mode"] + list(rows[0].keys())
-
-    with open(path, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fields)
-        if is_new:
-            writer.writeheader()
-        for r in rows:
-            writer.writerow({"scenario": scenario, "mode": mode, **r})
+    path = Path(out_dir) / "summary.csv"
+    append_summary_rows(path, scenario, mode, rows)
 
 
 # 6. one complete run 
