@@ -223,7 +223,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
                             "These rows come from the untracked practice folders "
                             "`experiments/test` and `experiments/receiver_test`. "
                             "They exercise the pipeline and must not be reported "
-                            "as the final four experiments."
+                            "as the final experiment set."
                         ),
                     ),
                 )
@@ -318,7 +318,10 @@ def main() -> int:
     parser.add_argument(
         "--final",
         action="store_true",
-        help="require the five final experiments with three consecutive runs",
+        help=(
+            "require the five reportable pairs and check the latest three "
+            "time-generated run IDs per pair"
+        ),
     )
     parser.add_argument(
         "--force",

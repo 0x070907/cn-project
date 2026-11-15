@@ -81,6 +81,37 @@ def write_csv(path: Path, fields: tuple[str, ...], rows: list[dict]) -> None:
         writer.writerows(rows)
 
 
+def append_summary_run(
+    experiments: Path,
+    folder: str,
+    scenario: str,
+    mode: str,
+    run_id: int,
+    flows: tuple[str, ...],
+) -> None:
+    path = experiments / folder / "summary.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    is_new = not path.exists()
+    with path.open("a", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=SUMMARY_FIELDS)
+        if is_new:
+            writer.writeheader()
+        for flow in flows:
+            writer.writerow(
+                {
+                    "scenario": scenario,
+                    "mode": mode,
+                    **metric_row(run_id, flow),
+                }
+            )
+
+
+def append_metric_rows(results: Path, rows: list[dict]) -> None:
+    with (results / "metrics.csv").open("a", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=METRICS_FIELDS)
+        writer.writerows(rows)
+
+
 def build_layout(root: Path, *, drop_flow: bool = False) -> tuple[Path, Path]:
     results = root / "results"
     experiments = root / "experiments"
@@ -170,6 +201,70 @@ class ValidationTests(unittest.TestCase):
                 report.render(),
             )
 
+    def test_older_nonconsecutive_runs_are_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            results, experiments = build_layout(Path(temporary))
+            append_summary_run(
+                experiments,
+                "baseline",
+                "no_congestion",
+                "none",
+                2000,
+                ("high",),
+            )
+            append_metric_rows(
+                results,
+                [metric_row(2000, "high"), metric_row(2000, "high")],
+            )
+            append_summary_run(
+                experiments,
+                "test",
+                "congestion",
+                "remote",
+                9000,
+                ("high",),
+            )
+
+            report = validate_all(results, experiments, strict=True, final=True)
+            self.assertEqual(report.errors, [], report.render())
+            self.assertEqual(report.warnings, [], report.render())
+
+    def test_latest_three_non_consecutive_runs_fail_final_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            results, experiments = build_layout(Path(temporary))
+            summary_path = experiments / "baseline" / "summary.csv"
+            with summary_path.open(newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            for row in rows:
+                if row["run_id"] == "2102":
+                    row["run_id"] = "2200"
+                    row["experiment_id"] = "2200"
+            write_csv(summary_path, SUMMARY_FIELDS, rows)
+
+            report = validate_all(results, experiments, final=True)
+            self.assertTrue(
+                any(issue.code == "final_non_consecutive_runs" for issue in report.errors),
+                report.render(),
+            )
+
+    def test_fewer_than_three_selected_runs_fail_final_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            results, experiments = build_layout(Path(temporary))
+            summary_path = experiments / "baseline" / "summary.csv"
+            with summary_path.open(newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            write_csv(
+                summary_path,
+                SUMMARY_FIELDS,
+                [row for row in rows if row["run_id"] != "2103"],
+            )
+
+            report = validate_all(results, experiments, final=True)
+            self.assertTrue(
+                any(issue.code == "final_too_few_runs" for issue in report.errors),
+                report.render(),
+            )
+
     def test_duplicate_row_is_a_strict_error(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             results, experiments = build_layout(Path(temporary))
@@ -189,22 +284,12 @@ class ValidationTests(unittest.TestCase):
                 strict_report.render(),
             )
 
-    def test_non_consecutive_runs_fail_final_validation(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            results, experiments = build_layout(Path(temporary))
-            summary_path = experiments / "baseline" / "summary.csv"
-            with summary_path.open(newline="") as handle:
-                rows = list(csv.DictReader(handle))
-            for row in rows:
-                if row["run_id"] == "2102":
-                    row["run_id"] = "2200"
-                    row["experiment_id"] = "2200"
-            write_csv(summary_path, SUMMARY_FIELDS, rows)
-
-            report = validate_all(results, experiments, final=True)
+            final_report = validate_all(
+                results, experiments, strict=True, final=True
+            )
             self.assertTrue(
-                any(issue.code == "final_non_consecutive_runs" for issue in report.errors),
-                report.render(),
+                any(issue.code == "strict_duplicate_metric_row" for issue in final_report.errors),
+                final_report.render(),
             )
 
 

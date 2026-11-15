@@ -27,9 +27,9 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from analysis.loader import load_summary_rows  # noqa: E402
 from analysis.schema import (  # noqa: E402
     CANONICAL_EXPERIMENTS,
-    COMPARISON_EXPERIMENTS,
     FAIRNESS_FIELDS,
     FLOWS,
     KNOWN_MANIFEST_MODES,
@@ -41,6 +41,14 @@ from analysis.schema import (  # noqa: E402
     SUMMARY_FIELDS,
     canonical_name,
     expected_flows,
+)
+from analysis.selection import (  # noqa: E402
+    REPORTABLE_FOLDERS,
+    REPORTABLE_PAIRS,
+    REPORT_RUN_COUNT,
+    consecutive_run_ids,
+    is_reportable_pair,
+    latest_run_ids,
 )
 
 SEVERITY_ERROR = "error"
@@ -115,6 +123,33 @@ class Report:
         for issue in self.issues:
             lines.append(issue.render())
         return "\n".join(lines)
+
+
+def _integer_or_none(value: object) -> int | None:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def _selected_final_runs(experiments_dir: Path) -> dict[str, tuple[int, ...]]:
+    """Scan summaries for the latest three IDs of each reportable pair."""
+
+    grouped: dict[str, set[int]] = {}
+    for row in load_summary_rows(experiments_dir):
+        folder = str(row.get("folder") or "")
+        scenario = str(row.get("scenario") or "")
+        if not is_reportable_pair(folder, scenario):
+            continue
+        run_id = row.get("run_id")
+        if run_id is None:
+            continue
+        grouped.setdefault(str(row["canonical"]), set()).add(int(run_id))
+
+    return {
+        name: latest_run_ids(grouped.get(name, ()))
+        for name in CANONICAL_EXPERIMENTS
+    }
 
 
 def _read_csv(
@@ -351,7 +386,12 @@ def _check_metric_row(
     return run_id, flow
 
 
-def validate_metrics(report: Report, path: Path) -> dict[tuple[int, str], list[int]]:
+def validate_metrics(
+    report: Report,
+    path: Path,
+    *,
+    run_ids: set[int] | None = None,
+) -> dict[tuple[int, str], list[int]]:
     """Validate results/metrics.csv and return row locations by (run, flow)."""
 
     rows = _read_csv(report, path, METRICS_FIELDS, "metrics.csv")
@@ -360,6 +400,8 @@ def validate_metrics(report: Report, path: Path) -> dict[tuple[int, str], list[i
         return locations
 
     for line, row in rows:
+        if run_ids is not None and _integer_or_none(row.get("run_id")) not in run_ids:
+            continue
         key = _check_metric_row(report, path, line, row)
         if key is None:
             continue
@@ -379,13 +421,20 @@ def validate_metrics(report: Report, path: Path) -> dict[tuple[int, str], list[i
     return locations
 
 
-def validate_fairness(report: Report, path: Path) -> dict[int, list[int]]:
+def validate_fairness(
+    report: Report,
+    path: Path,
+    *,
+    run_ids: set[int] | None = None,
+) -> dict[int, list[int]]:
     rows = _read_csv(report, path, FAIRNESS_FIELDS, "fairness.csv")
     locations: dict[int, list[int]] = {}
     if rows is None:
         return locations
 
     for line, row in rows:
+        if run_ids is not None and _integer_or_none(row.get("experiment_id")) not in run_ids:
+            continue
         experiment_id = (row.get("experiment_id") or "").strip()
         if not experiment_id:
             report.error("missing_value", path, line, "experiment_id is empty")
@@ -456,13 +505,20 @@ def validate_fairness(report: Report, path: Path) -> dict[int, list[int]]:
     return locations
 
 
-def validate_manifest(report: Report, path: Path) -> dict[int, list[int]]:
+def validate_manifest(
+    report: Report,
+    path: Path,
+    *,
+    run_ids: set[int] | None = None,
+) -> dict[int, list[int]]:
     rows = _read_csv(report, path, MANIFEST_FIELDS, "manifest.csv")
     locations: dict[int, list[int]] = {}
     if rows is None:
         return locations
 
     for line, row in rows:
+        if run_ids is not None and _integer_or_none(row.get("run_id")) not in run_ids:
+            continue
         run_id = _parse_int(report, path, line, row, "run_id")
         scenario = (row.get("scenario") or "").strip()
         mode = (row.get("mode") or "").strip()
@@ -504,6 +560,9 @@ def validate_summary(
     path: Path,
     folder: str,
     metrics_rows: dict[tuple[int, str], list[int]],
+    *,
+    run_ids: set[int] | None = None,
+    pairs: frozenset[tuple[str, str]] | None = None,
 ) -> list[dict[str, str]]:
     """Validate one experiments/<label>/summary.csv and return its rows."""
 
@@ -518,6 +577,10 @@ def validate_summary(
     for line, row in rows:
         scenario = (row.get("scenario") or "").strip()
         mode = (row.get("mode") or "").strip()
+        if pairs is not None and (folder, scenario) not in pairs:
+            continue
+        if run_ids is not None and _integer_or_none(row.get("run_id")) not in run_ids:
+            continue
         if scenario not in KNOWN_MANIFEST_SCENARIOS:
             report.error("unknown_scenario", path, line, f"scenario={scenario!r}")
         if mode not in KNOWN_MANIFEST_MODES:
@@ -592,7 +655,12 @@ def validate_summary(
     return normalised
 
 
-def validate_per_second(report: Report, path: Path) -> dict[tuple[int, str], list[int]]:
+def validate_per_second(
+    report: Report,
+    path: Path,
+    *,
+    run_ids: set[int] | None = None,
+) -> dict[tuple[int, str], list[int]]:
     rows = _read_csv(report, path, PER_SECOND_FIELDS, "per_second.csv")
     locations: dict[tuple[int, str], list[int]] = {}
     if rows is None:
@@ -600,6 +668,8 @@ def validate_per_second(report: Report, path: Path) -> dict[tuple[int, str], lis
 
     seen_seconds: dict[tuple[int, str], set[int]] = {}
     for line, row in rows:
+        if run_ids is not None and _integer_or_none(row.get("run_id")) not in run_ids:
+            continue
         run_id = _parse_int(report, path, line, row, "run_id")
         flow = (row.get("flow") or "").strip()
         if flow not in FLOWS:
@@ -756,20 +826,21 @@ def validate_cross_file(
 def validate_final_layout(
     report: Report,
     summaries: list[dict[str, str]],
+    selected_runs: dict[str, tuple[int, ...]],
     fairness_rows: dict[int, list[int]],
     per_second_runs: set[int],
     per_second_present: bool,
 ) -> None:
-    """Check the five-experiment, three-repeat final layout."""
+    """Check the latest three selected runs for the five final experiments."""
 
     by_canonical: dict[str, list[dict[str, str]]] = {}
     for entry in summaries:
         by_canonical.setdefault(entry["canonical"], []).append(entry)
 
-    all_run_ids: dict[int, set[str]] = {}
+    all_selected: dict[int, set[str]] = {}
     for name in CANONICAL_EXPERIMENTS:
-        entries = by_canonical.get(name, [])
-        if not entries:
+        selected = tuple(selected_runs.get(name, ()))
+        if not selected:
             report.error(
                 "final_missing_experiment",
                 None,
@@ -780,37 +851,43 @@ def validate_final_layout(
             )
             continue
 
-        runs: dict[int, list[dict[str, str]]] = {}
-        for entry in entries:
-            try:
-                run_id = int(entry.get("run_id", ""))
-            except (TypeError, ValueError):
-                continue
-            runs.setdefault(run_id, []).append(entry)
-            all_run_ids.setdefault(run_id, set()).add(name)
-
-        if len(runs) < 3:
+        if len(selected) < REPORT_RUN_COUNT:
             report.error(
                 "final_too_few_runs",
                 None,
                 None,
-                f"{name} has {len(runs)} run(s); at least 3 repeats are required",
+                f"{name} has {len(selected)} selected run(s); "
+                f"exactly {REPORT_RUN_COUNT} latest runs are required",
+            )
+        elif not consecutive_run_ids(selected):
+            report.error(
+                "final_non_consecutive_runs",
+                None,
+                None,
+                f"{name} latest run IDs {list(selected)} are not consecutive",
             )
 
-        ordered = sorted(runs)
-        if ordered:
-            expected_ids = list(range(ordered[0], ordered[0] + len(ordered)))
-            if ordered != expected_ids:
-                report.error(
-                    "final_non_consecutive_runs",
-                    None,
-                    None,
-                    f"{name} run IDs {ordered} are not consecutive",
-                )
+        runs: dict[int, list[dict[str, str]]] = {}
+        for entry in by_canonical.get(name, []):
+            run_id = _integer_or_none(entry.get("run_id"))
+            if run_id in selected:
+                runs.setdefault(run_id, []).append(entry)
+        for run_id in selected:
+            all_selected.setdefault(run_id, set()).add(name)
 
         scenario = CANONICAL_EXPERIMENTS[name][1]
         wanted = expected_flows(scenario)
-        for run_id, run_entries in sorted(runs.items()):
+        for run_id in selected:
+            run_entries = runs.get(run_id, [])
+            if not run_entries:
+                report.error(
+                    "final_missing_run",
+                    None,
+                    None,
+                    f"{name} selected run_id={run_id} has no summary rows",
+                )
+                continue
+
             flows = [entry.get("flow", "") for entry in run_entries]
             missing = [flow for flow in wanted if flow not in flows]
             extra = [flow for flow in flows if flow not in wanted]
@@ -844,7 +921,7 @@ def validate_final_layout(
                     f"{name} run_id={run_id} has no fairness.csv row",
                 )
 
-    for run_id, names in sorted(all_run_ids.items()):
+    for run_id, names in sorted(all_selected.items()):
         if len(names) > 1:
             report.error(
                 "final_reused_run_id",
@@ -853,7 +930,8 @@ def validate_final_layout(
                 f"run_id={run_id} is used by more than one experiment: {sorted(names)}",
             )
 
-    if "dynamic" in by_canonical:
+    dynamic_runs = tuple(selected_runs.get("dynamic", ()))
+    if dynamic_runs:
         if not per_second_present:
             report.error(
                 "final_missing_per_second",
@@ -863,30 +941,14 @@ def validate_final_layout(
                 "the surge timeline cannot be drawn",
             )
         else:
-            dynamic_runs = {
-                int(entry["run_id"])
-                for entry in by_canonical["dynamic"]
-                if str(entry.get("run_id", "")).isdigit()
-            }
-            for run_id in sorted(dynamic_runs - per_second_runs):
-                report.error(
-                    "final_dynamic_run_without_per_second",
-                    None,
-                    None,
-                    f"dynamic run_id={run_id} has no rows in results/per_second.csv",
-                )
-
-    for name in COMPARISON_EXPERIMENTS:
-        if name not in by_canonical:
-            continue
-        runs = {entry.get("run_id") for entry in by_canonical[name]}
-        if len(runs) < 3:
-            report.warning(
-                "final_short_experiment",
-                None,
-                None,
-                f"{name} has fewer than 3 distinct run IDs",
-            )
+            for run_id in dynamic_runs:
+                if run_id not in per_second_runs:
+                    report.error(
+                        "final_dynamic_run_without_per_second",
+                        None,
+                        None,
+                        f"dynamic run_id={run_id} has no rows in results/per_second.csv",
+                    )
 
 
 def validate_all(
@@ -903,28 +965,46 @@ def validate_all(
     manifest_path = results_dir / "manifest.csv"
     per_second_path = results_dir / "per_second.csv"
 
-    metrics_rows = validate_metrics(report, metrics_path)
-    fairness_rows = validate_fairness(report, fairness_path)
-    manifest_rows = validate_manifest(report, manifest_path)
+    selected_runs: dict[str, tuple[int, ...]] = {}
+    allowed_run_ids: set[int] | None = None
+    if final:
+        selected_runs = _selected_final_runs(experiments_dir)
+        allowed_run_ids = {
+            run_id
+            for run_ids in selected_runs.values()
+            for run_id in run_ids
+        }
+
+    metrics_rows = validate_metrics(report, metrics_path, run_ids=allowed_run_ids)
+    fairness_rows = validate_fairness(report, fairness_path, run_ids=allowed_run_ids)
+    manifest_rows = validate_manifest(report, manifest_path, run_ids=allowed_run_ids)
 
     if per_second_path.exists():
-        per_second_locations = validate_per_second(report, per_second_path)
+        per_second_locations = validate_per_second(
+            report, per_second_path, run_ids=allowed_run_ids
+        )
         per_second_runs = {run_id for run_id, _flow in per_second_locations}
         per_second_present = True
     else:
         per_second_runs = set()
         per_second_present = False
-        report.warning(
-            "missing_per_second",
-            per_second_path,
-            None,
-            "per-second metrics are not available; run the receiver after "
-            "upgrading app/metrics.py, or the surge timeline will be skipped",
-        )
+        if not final:
+            report.warning(
+                "missing_per_second",
+                per_second_path,
+                None,
+                "per-second metrics are not available; run the receiver after "
+                "upgrading app/metrics.py, or the surge timeline will be skipped",
+            )
 
     summaries: list[dict[str, str]] = []
     summary_paths = sorted(experiments_dir.glob("*/summary.csv")) if experiments_dir.exists() else []
-    if not summary_paths:
+    if final:
+        summary_paths = [
+            path for path in summary_paths
+            if path.parent.name in REPORTABLE_FOLDERS
+        ]
+    if not summary_paths and not final:
         report.error(
             "missing_summary",
             experiments_dir,
@@ -934,7 +1014,14 @@ def validate_all(
 
     for summary_path in summary_paths:
         folder = summary_path.parent.name
-        entries = validate_summary(report, summary_path, folder, metrics_rows)
+        entries = validate_summary(
+            report,
+            summary_path,
+            folder,
+            metrics_rows,
+            run_ids=allowed_run_ids,
+            pairs=REPORTABLE_PAIRS if final else None,
+        )
         for entry in entries:
             entry["source"] = str(summary_path)
         summaries.extend(entries)
@@ -988,6 +1075,7 @@ def validate_all(
         validate_final_layout(
             report,
             summaries,
+            selected_runs,
             fairness_rows,
             per_second_runs,
             per_second_present,
@@ -1041,7 +1129,10 @@ def main() -> int:
     parser.add_argument(
         "--final",
         action="store_true",
-        help="also require the five experiments with three consecutive runs each",
+        help=(
+            "require the five reportable pairs and check the latest three "
+            "time-generated run IDs per pair"
+        ),
     )
     args = parser.parse_args()
 
