@@ -38,17 +38,26 @@ view.
 
 ## 2. Measurement method
 
-Every sender writes an application header containing flow ID, sequence number,
-run ID, and a `time.monotonic_ns()` send timestamp. The receiver:
+Every sender packet is a 28-byte application header (flow ID, sequence number,
+run ID, and a `time.monotonic_ns()` send timestamp) followed by payload. The
+receiver:
 
 1. Tracks each `(run_id, flow_id)` independently across ports 5001–5004.
 2. Counts unique sequence numbers; duplicates do not count as delivered.
 3. Records `recv_ts_ns − send_ts_ns` for latency.
 4. Uses the sender's START/END packet count to compute loss.
-5. Writes one row per flow per run to `results/metrics.csv` and one fairness
+5. Sums payload bytes for goodput and complete data datagrams (header +
+   payload) for throughput, for the same unique delivered packets.
+6. Writes one row per flow per run to `results/metrics.csv` and one fairness
    row per run to `results/fairness.csv`.
-6. Writes one row per flow per second to `results/per_second.csv` for the surge
+7. Writes one row per flow per second to `results/per_second.csv` for the surge
    timeline.
+
+Both rates use the same measurement duration: the first data packet arrival to
+the sender's END message. Duplicate datagrams and the UDP/IP headers added by
+the kernel are not included in either byte count. Consequently throughput is
+higher than goodput by exactly the QoS-header share, and both are zero when the
+duration is zero.
 
 The runner copies the metric rows to
 `experiments/<label>/summary.csv` and the event log to
@@ -57,23 +66,31 @@ The runner copies the metric rows to
 ## 3. Metrics
 
 For a flow with `E` expected packets, `U` unique packets, `B` payload bytes,
-duration `T`, and per-packet latencies `L`:
+`R` complete received application bytes, duration `T`, and per-packet latencies
+`L`:
 
 ```text
 loss %      = max(0, E − U) / E × 100
-goodput     = B × 8 / T / 1,000,000              (Mbps, headers excluded)
+goodput     = B × 8 / T / 1,000,000              (Mbps, QoS header excluded)
+throughput  = R × 8 / T / 1,000,000              (Mbps, QoS header included)
 avg latency = mean(L)                            (ms)
 p95 latency = nearest-rank 95th percentile(L)    (ms)
-Jain index  = (Σ throughput)² / (n × Σ throughput²)
+Jain index  = (Σ goodput)² / (n × Σ goodput²)
 ```
 
+`R` is the sum of `len(packet)` for the unique delivered packets, so for packets
+of size `S` bytes it is `B + 28 × U`. Fairness remains based on delivered
+goodput, because that is the useful application rate.
+
 The report table takes the **median across the latest three selected runs** for
-each flow. The fairness table takes the median Jain index across those runs and
-shows the min–max spread.
+each flow, including median throughput. The fairness table takes the median Jain
+index across those runs and shows the min–max spread.
 
 `per_second.csv` is a timeline view, not a second independent measurement. Its
 per-second expected count is an even-spread estimate because the sender does
 not publish a per-second schedule. The exact totals remain in `metrics.csv`.
+Each per-second row has both `goodput_mbps` and `throughput_mbps`; the surge
+timeline plots both so the QoS-header overhead is visible over time.
 
 ## 4. Expected dynamic behaviour (hypothesis, not a result)
 
@@ -92,8 +109,10 @@ never logs a change, that is a finding to report, not something to hide.
 
 Paste the generated contents of:
 
-- `analysis/output/results_tables.md` (per-flow medians + Jain fairness)
-- `analysis/output/tables/per_flow_medians.csv`
+- `analysis/output/results_tables.md` (per-flow goodput/throughput medians +
+  Jain fairness)
+- `analysis/output/tables/per_flow_medians.csv` (includes
+  `throughput_mbps_median`)
 - `analysis/output/tables/fairness.csv`
 - `analysis/output/tables/fairness_by_run.csv`
 
@@ -119,11 +138,13 @@ Expected interpretation:
 | Figure | What to look for |
 |---|---|
 | `comparison_goodput.png` | protected flows keep their share under static/dynamic QoS |
+| `comparison_throughput.png` | same comparison for full application bytes, across all five reportable pairs |
 | `comparison_loss.png` | loss drops for HIGH/MEDIUM and moves to LOW/BACKGROUND |
 | `comparison_p95_latency.png` | tail latency falls for protected flows |
 | `comparison_avg_latency.png` | mean latency trend, less sensitive to outliers |
-| `surge_*.png` | static-surge reference vs dynamic surge |
-| `timeline_dynamic_<run_id>.png` | per-second goodput/loss/p95 with event and policy lines for each selected run |
+| `surge_goodput.png`, `surge_throughput.png` | static-surge reference vs dynamic surge |
+| `surge_loss.png`, `surge_p95_latency.png` | static-surge reference vs dynamic surge |
+| `timeline_dynamic_<run_id>.png` | per-second throughput/goodput/loss/p95 with event and policy lines for each selected run |
 | `timeline_dynamic_median.png` | median timeline across the three selected dynamic runs |
 
 The timeline uses the recovered run start from `events.csv`. The policy log must
@@ -143,6 +164,13 @@ use `time.monotonic_ns()` for the vertical lines to align.
   if that assumption changes, latency numbers need re-validation.
 - Per-second loss is estimated from the even-spread expected count, so treat
   single-second spikes cautiously and use the run totals for headline numbers.
+- Goodput and throughput differ by the 28-byte application header on every
+  delivered packet. With the configured packet sizes, that gap is larger for
+  small packets; quote both labels explicitly rather than treating them as
+  interchangeable.
+- Throughput uses `len(packet)` as returned by `recvfrom`, so it excludes the
+  UDP/IP headers added by the kernel. It is an application-level rate, not a
+  link-level or interface-counter rate.
 
 ## 8. Reproduce the analysis
 

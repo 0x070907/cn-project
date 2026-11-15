@@ -70,10 +70,12 @@ analysis/output/
 │   └── fairness_by_run.csv
 └── figures/
     ├── comparison_goodput.png
+    ├── comparison_throughput.png
     ├── comparison_loss.png
     ├── comparison_p95_latency.png
     ├── comparison_avg_latency.png
     ├── surge_goodput.png
+    ├── surge_throughput.png
     ├── surge_loss.png
     ├── surge_p95_latency.png
     ├── timeline_dynamic_<run_id>.png
@@ -104,6 +106,11 @@ charts, and the dynamic surge timelines. Older runs are ignored, even if they
 are not consecutive. The three selected IDs must themselves be consecutive;
 `--final --strict` fails otherwise.
 
+The main comparison charts cover `baseline`, `baseline_ryu`, `static`, and
+`dynamic`. The throughput chart (`comparison_throughput.png`) additionally
+includes the `static_surge` reference, so it compares all five reportable
+folder/scenario pairs under the same latest-three-run selection.
+
 Practice folders such as `experiments/test/` and
 `experiments/receiver_test/` are excluded from the final tables, figures, and
 `--final` validation. `--practice` adds a separate practice table and figures
@@ -114,7 +121,13 @@ for pipeline testing only. They are never presented as final results.
 `results/metrics.csv` remains the authoritative per-run table. The analysis
 takes the median across the latest three selected runs for each flow:
 
-- **Goodput** = payload bytes × 8 / duration / 10^6 (Mbps, headers excluded).
+- **Goodput** = payload bytes × 8 / duration / 10^6 (Mbps, QoS header excluded).
+- **Throughput** = total received application bytes × 8 / duration / 10^6
+  (Mbps, QoS header included). The byte total is the sum of the complete
+  application datagrams for the unique delivered packets: the 28-byte QoS
+  header plus payload. UDP/IP headers added by the kernel and duplicate
+  datagrams are not included. Both rates use the same first-data-packet → END
+  duration, so a zero duration produces zero for both.
 - **Packet loss** = max(0, expected − unique received) / expected × 100.
 - **Average latency** = mean of `recv_ts_ns − send_ts_ns`.
 - **p95 latency** = nearest-rank 95th percentile.
@@ -126,16 +139,18 @@ one row per flow per second:
 
 ```text
 experiment_id,run_id,flow,second,bucket_seconds,expected_packets,
-unique_received,lost_packets,packet_loss_pct,payload_bytes,
-goodput_mbps,avg_latency_ms,p95_latency_ms
+unique_received,lost_packets,packet_loss_pct,payload_bytes,received_bytes,
+goodput_mbps,throughput_mbps,avg_latency_ms,p95_latency_ms
 ```
 
 `second=0` is the second in which that flow's first data packet arrived.
 `bucket_seconds` is normally 1.0 and is smaller for the final partial second;
-it is used so goodput is not inflated in the last bucket. The sender does not
-publish a per-second schedule, so `expected_packets` in this file is an
-even-spread **estimate** over the measured duration. Use `metrics.csv` for
-exact run totals and `per_second.csv` for the shape of the timeline.
+it is used so goodput and throughput are not inflated in the last bucket. The
+sender does not publish a per-second schedule, so `expected_packets` in this
+file is an even-spread **estimate** over the measured duration. Use
+`metrics.csv` for exact run totals and `per_second.csv` for the shape of the
+timeline. The surge timeline shows throughput and goodput together so the
+header overhead is visible second by second.
 
 ## Dynamic-surge integration contract
 
@@ -188,9 +203,12 @@ belong to the dynamic-controller/runner owner:
    python3 -m analysis.analyze --final --strict
    ```
 
-4. **Per-second data.** The receiver must be the upgraded version in this
-   branch. No runner change is needed: it writes `results/per_second.csv`
-   automatically for every completed flow.
+4. **Per-second and throughput data.** The receiver must be the upgraded
+   version in this branch. No runner change is needed: it writes
+   `results/per_second.csv` automatically for every completed flow and adds
+   `received_bytes`/`throughput_mbps` to both CSVs. `--final --strict` requires
+   those throughput columns in every selected run, while legacy practice data
+   without them remains readable outside the final gate.
 
 ## What is still genuinely blocked
 

@@ -86,7 +86,8 @@ The script builds the network, starts `receiver.py` on h4 and one `sender.py` pe
 | Path | Content |
 |---|---|
 | `results/<scenario>_<run_id>/` | `receiver.log` and one `sender_<flow>.log` per flow |
-| `results/metrics.csv` | one row per flow per run (loss, goodput, latency) |
+| `results/metrics.csv` | one row per flow per run (loss, goodput, throughput, latency) |
+| `results/per_second.csv` | one row per flow per second for the surge timeline |
 | `results/fairness.csv` | Jain's fairness index per finished experiment |
 | `results/manifest.csv` | which `run_id` was which scenario and mode |
 | `experiments/<label>/summary.csv` | metrics rows plus scenario and mode |
