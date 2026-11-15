@@ -135,7 +135,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
     warnings: list[str] = []
 
     if not args.skip_plots:
-        main_rows = comparison_rows(flow_rows)
+        main_rows = canonical_rows(flow_rows)
         main_experiments = {
             row["experiment"] for row in main_rows
             if row["experiment"] in COMPARISON_EXPERIMENTS
@@ -161,13 +161,13 @@ def run_pipeline(args: argparse.Namespace) -> int:
                             figures_dir,
                             metric=metric,
                             title="QoS comparison — median of latest three runs",
+                            experiments=CANONICAL_EXPERIMENTS,
                         )
                     )
                 except NoPlotData as error:
                     skipped.append(str(error))
 
-        # Throughput is compared across all five reportable pairs, including
-        # the static-surge reference used by the dynamic experiment.
+        # Throughput is compared across all five reportable experiments.
         throughput_rows = canonical_rows(flow_rows)
         throughput_found = {
             str(row["experiment"]) for row in throughput_rows

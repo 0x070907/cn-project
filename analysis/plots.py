@@ -106,7 +106,7 @@ def plot_comparison(
             for flow_index in range(len(flows))
         ]
         values = [
-            _value(grouped.get(experiment, {}).get(flow, {}), metric)
+            _value(grouped.get(experiment, {}).get(flow, {}),f"{metric}_median") # fixed this bug cuz it was trying to look for just metric and not metric_median hence graph was showing N/A
             for flow in flows
         ]
         heights = [value if value is not None else 0.0 for value in values]
