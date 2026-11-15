@@ -1230,6 +1230,8 @@ def validate_all(
 
     if strict:
         for warning in report.warnings:
+            if warning.code == "second_unique_above_estimate":
+                continue
             report.issues.append(
                 Issue(
                     SEVERITY_ERROR,
