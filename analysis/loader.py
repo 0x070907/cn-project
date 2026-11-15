@@ -12,6 +12,7 @@ import csv
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
+from app.summary import read_summary_rows
 
 from analysis.schema import (
     CANONICAL_EXPERIMENTS,
@@ -105,24 +106,21 @@ def load_summary_rows(experiments_dir: Path) -> list[dict[str, Any]]:
 
     for path in sorted(experiments_dir.glob("*/summary.csv")):
         folder = path.parent.name
-        with path.open(newline="") as handle:
-            reader = csv.DictReader(handle)
-            for line_number, raw in enumerate(reader, start=2):
-                if all(value in (None, "") for value in raw.values()):
-                    continue
-                row = _normalise_metric_row(raw)
-                scenario = (raw.get("scenario") or "").strip()
-                row.update(
-                    {
-                        "folder": folder,
-                        "scenario": scenario,
-                        "mode": (raw.get("mode") or "").strip(),
-                        "canonical": canonical_name(folder, scenario),
-                        "source": str(path),
-                        "line": line_number,
-                    }
-                )
-                rows.append(row)
+        for line_number, raw in enumerate(read_summary_rows(path), start=2):
+            row = _normalise_metric_row(raw)
+            scenario = (raw.get("scenario") or "").strip()
+            row.update(
+                {
+                    "folder": folder,
+                    "scenario": scenario,
+                    "mode": (raw.get("mode") or "").strip(),
+                    "canonical": canonical_name(folder, scenario),
+                    "source": str(path),
+                    "line": line_number,
+                }
+            )
+            rows.append(row)
+
     return rows
 
 

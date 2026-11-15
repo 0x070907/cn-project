@@ -10,10 +10,12 @@ from pathlib import Path
 from typing import TypedDict
 
 try:
-    # Normal execution: receiver.py runs from app/ and imports protocol directly.
+    # Normal execution: receiver.py runs from app/ and imports siblings directly.
+    from csv_schema import append_dict_rows, ensure_schema, read_dict_rows
     from protocol import data_header_size
 except ImportError:  # pragma: no cover - exercised when imported as app.metrics
     # Test/package execution: the repository root is on sys.path.
+    from app.csv_schema import append_dict_rows, ensure_schema, read_dict_rows
     from app.protocol import data_header_size
 
 # imp (fix this later when done with the full thingy):  currently we assume that the sender and receivers monotonic clocks share the same time base, it works for localhost setup but may not work for mininet  
@@ -61,6 +63,26 @@ fields: list[str] = [
     "p95_latency_ms",
 ]
 
+# Header written before throughput was separated from goodput.  The migration
+# path uses this to reconstruct received_bytes/throughput_mbps for old rows.
+legacy_fields: list[str] = [
+    "experiment_id",
+    "run_id",
+    "flow",
+    "expected_packets",
+    "unique_received",
+    "duplicates",
+    "out_of_order",
+    "lost_packets",
+    "packet_loss_pct",
+    "payload_bytes",
+    "duration_seconds",
+    "goodput_mbps",
+    "avg_latency_ms",
+    "p50_latency_ms",
+    "p95_latency_ms",
+]
+
 # one row per flow per second, used by the dynamic surge timeline.  The totals
 # in metrics.csv stay the authoritative per-run numbers; these rows split the
 # same packets over time so the graph can show what changed while the run was
@@ -79,6 +101,22 @@ per_second_fields: list[str] = [
     "received_bytes",
     "goodput_mbps",
     "throughput_mbps",
+    "avg_latency_ms",
+    "p95_latency_ms",
+]
+
+legacy_per_second_fields: list[str] = [
+    "experiment_id",
+    "run_id",
+    "flow",
+    "second",
+    "bucket_seconds",
+    "expected_packets",
+    "unique_received",
+    "lost_packets",
+    "packet_loss_pct",
+    "payload_bytes",
+    "goodput_mbps",
     "avg_latency_ms",
     "p95_latency_ms",
 ]
@@ -102,6 +140,70 @@ def _mbps(byte_count: int, duration_seconds: float) -> float:
     if duration_seconds <= 0:
         return 0.0
     return byte_count * 8 / duration_seconds / 1_000_000
+
+
+def migrate_legacy_metric_row(row: Mapping[str, str]) -> dict[str, str]:
+    """Add the throughput fields to a pre-throughput metrics/summary row.
+
+    The old files only stored payload bytes.  Reconstruct the complete
+    application datagram count from the known QoS header size, then use the
+    same formula as ``record_run``.  Existing goodput and all other values are
+    preserved exactly.
+    """
+
+    migrated = dict(row)
+    payload_bytes = int(row["payload_bytes"])
+    unique_received = int(row["unique_received"])
+    duration_seconds = float(row["duration_seconds"])
+
+    received_bytes = payload_bytes + unique_received * data_header_size
+    migrated["received_bytes"] = str(received_bytes)
+    migrated["throughput_mbps"] = str(
+        round(_mbps(received_bytes, duration_seconds), 6)
+    )
+    return migrated
+
+
+def migrate_legacy_per_second_row(row: Mapping[str, str]) -> dict[str, str]:
+    """Add throughput fields to a pre-throughput per-second row."""
+
+    migrated = dict(row)
+    payload_bytes = int(row["payload_bytes"])
+    unique_received = int(row["unique_received"])
+    bucket_seconds = float(row["bucket_seconds"])
+
+    received_bytes = payload_bytes + unique_received * data_header_size
+    migrated["received_bytes"] = str(received_bytes)
+    migrated["throughput_mbps"] = str(
+        round(_mbps(received_bytes, bucket_seconds), 6)
+    )
+    return migrated
+
+
+def ensure_metrics_schema(path: Path | None = None) -> bool:
+    """Migrate ``metrics.csv`` to the current schema before reading/appending."""
+
+    target = path or csv_path
+    return ensure_schema(
+        target,
+        current_fields=fields,
+        legacy_fields=legacy_fields,
+        migrate_legacy=migrate_legacy_metric_row,
+        label="metrics.csv",
+    )
+
+
+def read_metrics_rows(path: Path | None = None) -> list[dict[str, str]]:
+    """Read metrics rows after safely migrating old headers."""
+
+    target = path or csv_path
+    return read_dict_rows(
+        target,
+        current_fields=fields,
+        legacy_fields=legacy_fields,
+        migrate_legacy=migrate_legacy_metric_row,
+        label="metrics.csv",
+    )
 
 
 def record_run(
@@ -175,17 +277,18 @@ def record_run(
         ),
     }
 
-    # then we uh append each completed run without overwriting previous results
+    # then we uh append each completed run without overwriting previous results.
+    # append_dict_rows first reconciles any legacy header, so a new-width row
+    # can never be written underneath an old header.
     results_dir.mkdir(parents=True, exist_ok=True)  # create results/ on first write
-    file_exists = csv_path.exists() and csv_path.stat().st_size > 0
-
-    with csv_path.open("a", newline="") as file:
-        writer = csv.DictWriter(file, fieldnames=fields)
-
-        if not file_exists:
-            writer.writeheader()
-
-        writer.writerow(row)
+    append_dict_rows(
+        csv_path,
+        current_fields=fields,
+        rows=[row],
+        legacy_fields=legacy_fields,
+        migrate_legacy=migrate_legacy_metric_row,
+        label="metrics.csv",
+    )
 
     print(f"saved metrics for {flow} run {run_id}")
 
@@ -292,15 +395,14 @@ def record_per_second(
         )
 
     results_dir.mkdir(parents=True, exist_ok=True)
-    file_exists = per_second_path.exists() and per_second_path.stat().st_size > 0
-
-    with per_second_path.open("a", newline="") as file:
-        writer = csv.DictWriter(file, fieldnames=per_second_fields)
-
-        if not file_exists:
-            writer.writeheader()
-
-        writer.writerows(rows)
+    append_dict_rows(
+        per_second_path,
+        current_fields=per_second_fields,
+        rows=rows,
+        legacy_fields=legacy_per_second_fields,
+        migrate_legacy=migrate_legacy_per_second_row,
+        label="per_second.csv",
+    )
 
     print(f"saved per-second metrics for {flow} run {run_id}")
 
