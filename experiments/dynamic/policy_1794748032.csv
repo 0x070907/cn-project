@@ -1,0 +1,3 @@
+ts_ns,flow_id,old_queue,new_queue,reason
+1924447396542,high,1,2,sustained congestion detected
+1924447571992,medium,2,1,sustained congestion detected
