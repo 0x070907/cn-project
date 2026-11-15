@@ -21,11 +21,11 @@ import matplotlib.pyplot as plt  # noqa: E402
 
 from analysis.loader import (
     Dataset,
-    canonical_groups,
     find_events_file,
     find_policy_file,
     load_events,
     load_policy,
+    report_groups,
 )
 from analysis.schema import (
     COMPARISON_EXPERIMENTS,
@@ -409,9 +409,9 @@ def surge_run_inputs(
     canonical: str = "dynamic",
     policy_log: Path | None = None,
 ) -> list[dict[str, Any]]:
-    """Collect per-second rows, events and policy changes for each surge run."""
+    """Collect data for the latest three selected runs of a surge group."""
 
-    groups = canonical_groups(dataset)
+    groups = report_groups(dataset)
     runs = groups.get(canonical, {})
     inputs: list[dict[str, Any]] = []
 

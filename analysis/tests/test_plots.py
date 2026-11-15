@@ -19,8 +19,14 @@ from analysis.plots import (
     policy_offsets,
     surge_run_inputs,
 )
-from analysis.schema import EVENT_FIELDS, POLICY_FIELDS
-from analysis.tests.test_validation import build_layout
+from analysis.schema import (
+    EVENT_FIELDS,
+    EXPECTED_FLOWS,
+    PER_SECOND_FIELDS,
+    POLICY_FIELDS,
+)
+from analysis.tests.test_aggregation import append_summary_run
+from analysis.tests.test_validation import build_layout, per_second_row
 
 
 class PlotTests(unittest.TestCase):
@@ -32,6 +38,41 @@ class PlotTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def test_surge_timeline_uses_only_latest_three_runs(self) -> None:
+        legacy_run = 2000
+        append_summary_run(
+            self.experiments,
+            "dynamic",
+            "surge",
+            "remote",
+            legacy_run,
+            EXPECTED_FLOWS["surge"],
+        )
+        with (self.results / "per_second.csv").open("a", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=PER_SECOND_FIELDS)
+            for flow in EXPECTED_FLOWS["surge"]:
+                writer.writerow(per_second_row(legacy_run, flow))
+
+        dataset = load_dataset(self.results, self.experiments)
+        inputs = surge_run_inputs(
+            dataset,
+            self.results,
+            self.experiments,
+            canonical="dynamic",
+        )
+        self.assertEqual([item["run_id"] for item in inputs], [2110, 2111, 2112])
+
+        paths = plot_surge_figures(
+            dataset,
+            self.results,
+            self.experiments,
+            self.root / "surge-selected",
+        )
+        names = [path.name for path in paths]
+        self.assertNotIn(f"timeline_dynamic_{legacy_run}.png", names)
+        self.assertIn("timeline_dynamic_2110.png", names)
+        self.assertIn("timeline_dynamic_median.png", names)
 
     def test_comparison_figure_is_written(self) -> None:
         rows = comparison_rows(aggregate_flow_medians(self.dataset))

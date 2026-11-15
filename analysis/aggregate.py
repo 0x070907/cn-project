@@ -8,7 +8,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
-from analysis.loader import Dataset, canonical_groups
+from analysis.loader import Dataset, report_groups
 from analysis.schema import (
     CANONICAL_EXPERIMENTS,
     COMPARISON_EXPERIMENTS,
@@ -81,10 +81,14 @@ def _metric(row: dict[str, Any], name: str) -> float | None:
     return float(value) if isinstance(value, (int, float)) else None
 
 
-def aggregate_flow_medians(dataset: Dataset) -> list[dict[str, Any]]:
-    """Median of each flow metric across a canonical experiment's runs."""
+def aggregate_flow_medians(
+    dataset: Dataset,
+    *,
+    practice: bool = False,
+) -> list[dict[str, Any]]:
+    """Median of each flow metric across the latest three selected runs."""
 
-    groups = canonical_groups(dataset)
+    groups = report_groups(dataset, practice=practice)
     table: list[dict[str, Any]] = []
 
     for canonical, runs in groups.items():
@@ -165,10 +169,14 @@ def jains_index(throughputs: Iterable[float]) -> float | None:
     return total * total / (len(values) * sum(value * value for value in values))
 
 
-def fairness_per_run(dataset: Dataset) -> list[dict[str, Any]]:
-    """One fairness row per run, preferring the receiver's fairness.csv value."""
+def fairness_per_run(
+    dataset: Dataset,
+    *,
+    practice: bool = False,
+) -> list[dict[str, Any]]:
+    """One fairness row per selected run, preferring fairness.csv values."""
 
-    groups = canonical_groups(dataset)
+    groups = report_groups(dataset, practice=practice)
     rows: list[dict[str, Any]] = []
 
     for canonical, runs in groups.items():
@@ -211,8 +219,12 @@ def fairness_per_run(dataset: Dataset) -> list[dict[str, Any]]:
     return rows
 
 
-def aggregate_fairness(dataset: Dataset) -> list[dict[str, Any]]:
-    per_run = fairness_per_run(dataset)
+def aggregate_fairness(
+    dataset: Dataset,
+    *,
+    practice: bool = False,
+) -> list[dict[str, Any]]:
+    per_run = fairness_per_run(dataset, practice=practice)
     by_experiment: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in per_run:
         by_experiment[str(row["experiment"])].append(row)

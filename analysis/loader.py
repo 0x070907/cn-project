@@ -20,6 +20,7 @@ from analysis.schema import (
     REPO_ROOT,
     canonical_name,
 )
+from analysis.selection import practice_groups, select_canonical_groups
 
 METRIC_NUMERIC_FIELDS: tuple[str, ...] = (
     "run_id",
@@ -374,16 +375,37 @@ def canonical_groups(dataset: Dataset) -> dict[str, dict[int, list[dict[str, Any
     return group_runs(dataset.summaries)
 
 
+def report_groups(
+    dataset: Dataset,
+    *,
+    practice: bool = False,
+) -> dict[str, dict[int, list[dict[str, Any]]]]:
+    """Return rows for the report, with the latest three runs per pair.
+
+    Practice groups keep all of their runs because they are diagnostic data,
+    not part of the final report.
+    """
+
+    groups = canonical_groups(dataset)
+    if practice:
+        return practice_groups(groups)
+    return select_canonical_groups(groups)
+
+
 def available_canonical(dataset: Dataset) -> list[str]:
     groups = canonical_groups(dataset)
-    ordered = [name for name in CANONICAL_EXPERIMENTS if name in groups]
-    ordered.extend(sorted(name for name in groups if name not in CANONICAL_EXPERIMENTS))
-    return ordered
+    return [name for name in CANONICAL_EXPERIMENTS if name in groups]
+
+
+def available_practice(dataset: Dataset) -> list[str]:
+    groups = canonical_groups(dataset)
+    return sorted(name for name in groups if name not in CANONICAL_EXPERIMENTS)
 
 
 __all__ = [
     "Dataset",
     "available_canonical",
+    "available_practice",
     "canonical_groups",
     "deduplicate_rows",
     "find_events_file",
@@ -396,4 +418,5 @@ __all__ = [
     "load_per_second",
     "load_policy",
     "load_summary_rows",
+    "report_groups",
 ]

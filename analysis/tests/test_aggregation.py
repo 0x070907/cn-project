@@ -2,13 +2,39 @@
 
 from __future__ import annotations
 
+import csv
 import tempfile
 import unittest
 from pathlib import Path
 
 from analysis.aggregate import aggregate_fairness, aggregate_flow_medians, fairness_per_run
 from analysis.loader import load_dataset
-from analysis.tests.test_validation import build_layout
+from analysis.schema import EXPECTED_FLOWS, SUMMARY_FIELDS
+from analysis.tests.test_validation import build_layout, metric_row
+
+
+def append_summary_run(
+    experiments: Path,
+    folder: str,
+    scenario: str,
+    mode: str,
+    run_id: int,
+    flows: tuple[str, ...],
+    *,
+    goodput_mbps: float | None = None,
+) -> None:
+    path = experiments / folder / "summary.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    is_new = not path.exists()
+    with path.open("a", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=SUMMARY_FIELDS)
+        if is_new:
+            writer.writeheader()
+        for flow in flows:
+            row = metric_row(run_id, flow)
+            if goodput_mbps is not None:
+                row["goodput_mbps"] = goodput_mbps
+            writer.writerow({"scenario": scenario, "mode": mode, **row})
 
 
 class AggregationTests(unittest.TestCase):
@@ -28,6 +54,58 @@ class AggregationTests(unittest.TestCase):
             # The no-congestion baseline only promises two flows.
             self.assertIn(("baseline", "high"), by_key)
             self.assertNotIn(("baseline", "low"), by_key)
+
+    def test_older_nonconsecutive_runs_are_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            results, experiments = build_layout(Path(temporary))
+            append_summary_run(
+                experiments,
+                "baseline",
+                "no_congestion",
+                "none",
+                2000,
+                EXPECTED_FLOWS["no_congestion"],
+                goodput_mbps=99.0,
+            )
+
+            dataset = load_dataset(results, experiments)
+            rows = aggregate_flow_medians(dataset)
+            baseline = {
+                row["flow"]: row
+                for row in rows
+                if row["experiment"] == "baseline"
+            }
+            self.assertEqual(baseline["high"]["run_ids"], "2101 2102 2103")
+            self.assertNotEqual(baseline["high"]["goodput_mbps_median"], 99.0)
+
+    def test_practice_groups_are_separate_from_the_final_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            results, experiments = build_layout(Path(temporary))
+            append_summary_run(
+                experiments,
+                "test",
+                "no_congestion",
+                "none",
+                9000,
+                EXPECTED_FLOWS["no_congestion"],
+            )
+
+            dataset = load_dataset(results, experiments)
+            final_experiments = {
+                row["experiment"] for row in aggregate_flow_medians(dataset)
+            }
+            practice_experiments = {
+                row["experiment"]
+                for row in aggregate_flow_medians(dataset, practice=True)
+            }
+            self.assertNotIn("test/no_congestion", final_experiments)
+            self.assertEqual(practice_experiments, {"test/no_congestion"})
+
+            practice_fairness = aggregate_fairness(dataset, practice=True)
+            self.assertEqual(
+                {row["experiment"] for row in practice_fairness},
+                {"test/no_congestion"},
+            )
 
     def test_fairness_prefers_fairness_csv_and_aggregates(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

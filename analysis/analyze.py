@@ -33,14 +33,19 @@ from analysis.aggregate import (  # noqa: E402
     render_flow_table,
     write_csv,
 )
-from analysis.loader import Dataset, available_canonical, load_dataset  # noqa: E402
+from analysis.loader import (  # noqa: E402
+    Dataset,
+    available_canonical,
+    available_practice,
+    load_dataset,
+)
 from analysis.plots import (  # noqa: E402
     NoPlotData,
     plot_comparison,
     plot_surge_figures,
     plot_surge_reference,
 )
-from analysis.schema import CANONICAL_EXPERIMENTS, COMPARISON_EXPERIMENTS, REPO_ROOT  # noqa: E402
+from analysis.schema import COMPARISON_EXPERIMENTS, REPO_ROOT  # noqa: E402
 from analysis.validate import validate_all  # noqa: E402
 
 
@@ -105,13 +110,12 @@ def run_pipeline(args: argparse.Namespace) -> int:
     write_csv(tables_dir / "fairness_by_run.csv", FAIRNESS_RUN_FIELDS, fairness_runs)
 
     all_groups = available_canonical(dataset)
-    canonical_available = [
-        name for name in all_groups if name in CANONICAL_EXPERIMENTS
-    ]
+    practice_available = available_practice(dataset)
     note = (
-        "Values are the median across the available repeats. "
-        "`n_runs` shows how many runs contributed; a dash means the flow was "
-        "not part of that scenario or no row was recorded."
+        "Values are medians across the latest three run IDs for each "
+        "folder/scenario pair. Older runs and practice folders are excluded. "
+        "`n_runs` shows how many selected runs contributed; a dash means the "
+        "flow was not part of that scenario or no row was recorded."
     )
     table_markdown = _table_markdown(
         flow_rows,
@@ -151,7 +155,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
                             main_rows,
                             figures_dir,
                             metric=metric,
-                            title="QoS comparison — median of available runs",
+                            title="QoS comparison — median of latest three runs",
                         )
                     )
                 except NoPlotData as error:
@@ -188,10 +192,8 @@ def run_pipeline(args: argparse.Namespace) -> int:
             )
 
         if args.practice:
-            practice_rows = [
-                row for row in flow_rows
-                if row["experiment"] not in CANONICAL_EXPERIMENTS
-            ]
+            practice_rows = aggregate_flow_medians(dataset, practice=True)
+            practice_fairness_rows = aggregate_fairness(dataset, practice=True)
             if practice_rows:
                 practice_dir = figures_dir / "practice"
                 practice_experiments = sorted(
@@ -215,7 +217,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
                     output_dir / "practice_tables.md",
                     _table_markdown(
                         practice_rows,
-                        [row for row in fairness_rows if row["experiment"] not in CANONICAL_EXPERIMENTS],
+                        practice_fairness_rows,
                         title="Practice data (not final results)",
                         note=(
                             "These rows come from the untracked practice folders "
@@ -229,8 +231,8 @@ def run_pipeline(args: argparse.Namespace) -> int:
     summary_lines = [
         "# Analysis pipeline summary",
         "",
-        f"Canonical experiments found: {', '.join(canonical_available) or 'none'}",
-        f"Experiment groups found: {', '.join(all_groups) or 'none'}",
+        f"Canonical experiments found: {', '.join(all_groups) or 'none'}",
+        f"Practice groups found: {', '.join(practice_available) or 'none'}",
         "",
         "## Tables",
         "",
