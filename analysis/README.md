@@ -2,13 +2,15 @@
 
 This directory turns the raw CSVs into the Demo 2 tables and figures:
 
+- `analysis/selection.py` — defines the five reportable folder/scenario pairs
+  and selects the latest three run IDs for each one.
 - `analysis/validate.py` — checks schemas, formulas, duplicate runs, missing
   flows, reused run IDs, and the final five-experiment layout.
 - `analysis/loader.py` — reads `experiments/*/summary.csv`, `results/fairness.csv`,
   `results/manifest.csv`, `results/per_second.csv`, `events.csv`, and the
   controller policy log.
-- `analysis/aggregate.py` — takes the **median of the three repeats** for each
-  flow and builds the Jain fairness table.
+- `analysis/aggregate.py` — takes the **median of the latest three selected
+  runs** for each flow and builds the Jain fairness table.
 - `analysis/plots.py` — comparison bar charts and the dynamic surge timeline.
 - `analysis/analyze.py` — runs the whole pipeline in one command.
 
@@ -23,14 +25,16 @@ From the repository root:
 # 1. Validate what is currently on disk (warnings allowed).
 python3 analysis/validate.py
 
-# 2. Run tables + figures from the committed summaries.
+# 2. Run tables + figures from the five reportable pairs, selecting the latest
+#    three run IDs for each pair and ignoring older runs and practice folders.
 python3 -m analysis.analyze
 
 # 3. Exercise the figures with the existing practice data.
 #    These outputs are explicitly marked "not final results".
 python3 -m analysis.analyze --practice
 
-# 4. Pre-submission gate: five experiments x three consecutive runs.
+# 4. Pre-submission gate: latest three time-generated run IDs per pair, with
+#    those three IDs consecutive.
 python3 -m analysis.analyze --final --strict
 
 # Module tests (no Mininet, no network traffic).
@@ -47,7 +51,8 @@ Useful options:
 --practice          also plot non-canonical practice folders
 --skip-plots        write only CSV/Markdown tables
 --strict            treat validation warnings as errors
---final             require the five final experiments and 3 consecutive runs
+--final             require the five reportable pairs; check that their latest
+                    three time-generated run IDs are consecutive
 --force             keep generating outputs even if strict validation fails
 ```
 
@@ -90,17 +95,24 @@ The reportable combinations are:
 `run_all.py` uses the label `static` for both the static congested run and the
 extra static-policy surge run. The analysis distinguishes them by scenario.
 Their run IDs must therefore be different; `--final --strict` rejects a reused
-ID.
+ID among the selected runs.
+
+For each folder/scenario pair the pipeline sorts the available run IDs
+numerically (the runner generates them from `time.time()`), keeps the latest
+three, and uses only those three for tables, fairness, validation, comparison
+charts, and the dynamic surge timelines. Older runs are ignored, even if they
+are not consecutive. The three selected IDs must themselves be consecutive;
+`--final --strict` fails otherwise.
 
 Practice folders such as `experiments/test/` and
-`experiments/receiver_test/` stay visible as `<folder>/<scenario>` and are never
-mixed into the four main comparison groups. `--practice` draws them for
-pipeline testing only.
+`experiments/receiver_test/` are excluded from the final tables, figures, and
+`--final` validation. `--practice` adds a separate practice table and figures
+for pipeline testing only. They are never presented as final results.
 
 ## Metric definitions
 
 `results/metrics.csv` remains the authoritative per-run table. The analysis
-takes the median across runs for each flow:
+takes the median across the latest three selected runs for each flow:
 
 - **Goodput** = payload bytes × 8 / duration / 10^6 (Mbps, headers excluded).
 - **Packet loss** = max(0, expected − unique received) / expected × 100.
@@ -155,33 +167,22 @@ belong to the dynamic-controller/runner owner:
    `joined 10s into the run`. A future `run_start` event is used directly if
    added. Policy timestamps use the same recovered start.
 
-3. **Final data collection.** `run_all.py` currently has no `--run-id` option
-   and does not include `static_surge` by default. Until the runner owner adds
-   those options, use explicit IDs with `run_experiment.py`:
+3. **Final data collection.** Run IDs are generated automatically by
+   `mininet/run_experiment.py` from the current time, and each repeat in a batch
+   increments the ID by one. Do not assign manual IDs. `run_all.py` runs the
+   four default groups; `static_surge` must be requested separately:
 
    ```bash
-   # Baseline: no controller, TCLink cap.
-   sudo python3 mininet/run_experiment.py no_congestion \
-       --mode none --cap tclink --label baseline --run-id 2101 --repeat 3
-
-   # baseline_ryu needs Ryu running externally with baseline_controller.py.
-   sudo python3 mininet/run_experiment.py congestion \
-       --mode remote --cap tclink --label baseline_ryu --run-id 2104 --repeat 3
-
-   # Static QoS on the congested scenario.
-   sudo python3 mininet/run_experiment.py congestion \
-       --mode remote --cap none --queues --label static --run-id 2107 --repeat 3
+   # Baseline, baseline_ryu, static/congestion and dynamic/surge.
+   sudo python3 mininet/run_all.py --repeat 3
 
    # Static QoS on the surge (reference for dynamic).
-   sudo python3 mininet/run_experiment.py surge \
-       --mode remote --cap none --queues --label static --run-id 2110 --repeat 3
-
-   # Dynamic QoS on the surge.
-   sudo python3 mininet/run_experiment.py surge \
-       --mode remote --cap none --queues --label dynamic --run-id 2113 --repeat 3
+   sudo python3 mininet/run_all.py --only static_surge --repeat 3
    ```
 
-   Then run the final gate:
+   If a group is rerun, its three newest run IDs become the selected repeats.
+   Older runs can stay in place; the analysis ignores them. Then run the final
+   gate:
 
    ```bash
    python3 -m analysis.analyze --final --strict

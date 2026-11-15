@@ -24,10 +24,17 @@ commands are at the bottom of this file.
 policy from the effect of simply having static queues. The four main comparison
 charts use `baseline`, `baseline_ryu`, `static`, and `dynamic`.
 
-Use distinct and consecutive run IDs per experiment. The analysis treats
-`static` + `congestion` and `static` + `surge` as separate report groups, so
-reusing a run ID across those groups contaminates the tables and fails
-`--final --strict`.
+Run IDs are generated automatically from `time.time()`; each repeat in a batch
+increments the ID by one. Do not assign them by hand. For each of the five
+reportable folder/scenario pairs, the analysis selects the latest three run IDs
+numerically and checks that those three IDs are consecutive. Older runs are
+ignored, even when they are not consecutive.
+
+The analysis treats `static` + `congestion` and `static` + `surge` as separate
+report groups, so reusing a selected run ID across those groups contaminates the
+tables and fails `--final --strict`. Practice folders are excluded from final
+tables, figures, and validation; use `--practice` for the separate practice
+view.
 
 ## 2. Measurement method
 
@@ -60,9 +67,9 @@ p95 latency = nearest-rank 95th percentile(L)    (ms)
 Jain index  = (Σ throughput)² / (n × Σ throughput²)
 ```
 
-The report table takes the **median across the three repeats** for each flow.
-The fairness table takes the median Jain index across repeats and shows the
-min–max spread.
+The report table takes the **median across the latest three selected runs** for
+each flow. The fairness table takes the median Jain index across those runs and
+shows the min–max spread.
 
 `per_second.csv` is a timeline view, not a second independent measurement. Its
 per-second expected count is an even-spread estimate because the sender does
@@ -116,8 +123,8 @@ Expected interpretation:
 | `comparison_p95_latency.png` | tail latency falls for protected flows |
 | `comparison_avg_latency.png` | mean latency trend, less sensitive to outliers |
 | `surge_*.png` | static-surge reference vs dynamic surge |
-| `timeline_dynamic_<run_id>.png` | per-second goodput/loss/p95 with event and policy lines |
-| `timeline_dynamic_median.png` | median timeline across the three dynamic repeats |
+| `timeline_dynamic_<run_id>.png` | per-second goodput/loss/p95 with event and policy lines for each selected run |
+| `timeline_dynamic_median.png` | median timeline across the three selected dynamic runs |
 
 The timeline uses the recovered run start from `events.csv`. The policy log must
 use `time.monotonic_ns()` for the vertical lines to align.
@@ -146,8 +153,9 @@ python3 analysis/validate.py
 # Regenerate tables and figures from committed summaries.
 python3 -m analysis.analyze
 
-# Final pre-submission gate: five experiments, three consecutive runs each,
-# no duplicate rows, no missing flows, fairness present, per-second data present.
+# Final pre-submission gate: five reportable pairs, latest three time-generated
+# run IDs per pair, those three consecutive, no duplicate rows, no missing
+# flows, fairness present, per-second data present.
 python3 -m analysis.analyze --final --strict
 
 # Practice-only figures (clearly marked "not final results").
