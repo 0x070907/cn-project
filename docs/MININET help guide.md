@@ -61,8 +61,8 @@ sudo python3 mininet/topology.py --mode remote
 ## 3. Experiment 1 - No controller
 
 ```bash
-sudo python3 mininet/run_experiment.py congestion --duration 10 --run-id 4 --label baseline   # no controller mode,so label=baseline
-sudo python3 mininet/run_experiment.py no_congestion --duration 10 --repeat 3 --run-id 5 --label baseline  # 3 runs, ids 5, 6, 7
+sudo python3 mininet/run_experiment.py congestion --duration 10 --label baseline   # no controller mode,so label=baseline
+sudo python3 mininet/run_experiment.py no_congestion --duration 10 --repeat 3 --label baseline  # 3 generated run IDs
 ```
 
 | Option | Meaning | Default |
@@ -71,12 +71,12 @@ sudo python3 mininet/run_experiment.py no_congestion --duration 10 --repeat 3 --
 | `--mode` | `none` = no controller, `remote` = Ryu | `none` |
 | `--duration` | seconds of traffic | 30 |
 | `--repeat` | number of runs | 1 |
-| `--run-id` | id shared by all senders of a run; with `--repeat` it goes up by 1 each run | current time |
+| `--run-id` | optional id shared by all senders of a run; normally omit it and let the runner generate the current time | current time |
 | `--label` | folder name under `experiments/` | `baseline` |
 
 > refer the `mininet/run_experiment.py` file for more info abt these cla's
 
-- Use a **new `--run-id` for every run**: all the results are grouped by it, so don't reuse.
+- Do not assign run IDs by hand. The runner generates them from `time.time()`, and each repeat in a batch increments the ID by one. All results are grouped by run ID, so IDs must be unique across report groups.
 - Use `--label test` for practice runs so they don't end up in `experiments/baseline/`.
 
 The script builds the network, starts `receiver.py` on h4 and one `sender.py` per flow on h1, h2 and h3, then saves the results.
@@ -176,7 +176,7 @@ Expect `switch connected: dpid=1` and `dpid=2` once Mininet starts. Leave it run
 **Terminal 2: the network** 
 
 ```bash
-sudo python3 mininet/run_experiment.py congestion --mode remote --cap none --queues --run-id 186 --duration 30 --label static
+sudo python3 mininet/run_experiment.py congestion --mode remote --cap none --queues --duration 30 --label static
 ```
 
 - the mode must be `remote`,to control the switches in mininet by our controller.
